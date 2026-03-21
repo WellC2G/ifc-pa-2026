@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
         self.tree.setHeaderLabel("Struct of IFC")
 
         self.viewport = QWidget()
-        self.viewport.setStyle("background-color: #333333;")
+        self.viewport.setStyleSheet("background-color: #333333;")
 
         self.bottom_panel = QTextEdit()
         self.bottom_panel.setPlaceholderText("Place for logs")
