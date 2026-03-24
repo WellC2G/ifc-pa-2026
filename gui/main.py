@@ -1,3 +1,5 @@
+from viewport import IFCViewport
+
 import sys
 
 from PyQt6.QtWidgets import ( 
@@ -8,6 +10,8 @@ from PyQt6.QtWidgets import (
     QMainWindow, 
     QSplitter,
     QTextEdit,
+    QFileDialog,
+    QTreeWidgetItem
     )
 from PyQt6.QtCore import (
     Qt,
@@ -49,8 +53,8 @@ class MainWindow(QMainWindow):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabel("Struct of IFC")
 
-        self.viewport = QWidget()
-        self.viewport.setStyleSheet("background-color: #333333;")
+        self.viewport = IFCViewport()
+        # self.viewport.setStyleSheet("background-color: #333333;")
 
         self.bottom_panel = QTextEdit()
         self.bottom_panel.setPlaceholderText("Place for logs")
@@ -75,13 +79,32 @@ class MainWindow(QMainWindow):
         # just status bar
         self.statusBar().showMessage("Ready to work")
 
+        # create root of tree
+        project_node = QTreeWidgetItem(self.tree, ["Project: House"])
+
+        # childs
+        floor_node = QTreeWidgetItem(project_node, ["Floor 1"])
+
+        wall_node = QTreeWidgetItem(floor_node, ["Wall_Basic_200mm"])
+        wall_node2 = QTreeWidgetItem(floor_node, ["Wall_Basic_100mm"])
+
+        # open all nodes
+        self.tree.expandAll()
+
+        self.tree.itemClicked.connect(self.__on_tree_click)
+
     def __create_menu(self):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
 
+        open_action = QAction("Open", self)
         exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(self.close)
+        
 
+        exit_action.triggered.connect(self.close)
+        open_action.triggered.connect(self.__open_file)
+
+        file_menu.addAction(open_action)
         file_menu.addAction(exit_action)
 
     def __restore_settings(self):
@@ -97,6 +120,21 @@ class MainWindow(QMainWindow):
         h_state = self.settings.value("h_splitter_state")
         if h_state:
             self.h_splitter.restoreState(h_state)
+
+    def __on_tree_click(self, item, column):
+        node_name = item.text(column)
+        self.bottom_panel.append(f"Clicked on: {node_name}")
+
+    def __open_file(self):
+        file_path, filter_type = QFileDialog.getOpenFileName(
+            self,
+            "Select IFC Model",
+            "",
+            "IFC Files (*.ifc);;All Files (*)"
+        )
+
+        if file_path:
+            self.bottom_panel.append(f"File selected: {file_path}")
 
     def closeEvent(self, event):
         """this method called before close app"""
