@@ -1,6 +1,8 @@
 from viewport import IFCViewport
+from parse_core.get_data.get_project_hierarchy import get_project_hierarchy
 
 import sys
+import ifcopenshell
 
 from PyQt6.QtWidgets import ( 
     QApplication, 
@@ -37,7 +39,6 @@ class MainWindow(QMainWindow):
 
         # load settings (AFTER BUILD ALL WIDGETS)
         self.__restore_settings()
-
 
     def __init_ui(self):
         # two main widget
@@ -93,6 +94,20 @@ class MainWindow(QMainWindow):
 
         self.tree.itemClicked.connect(self.__on_tree_click)
 
+    def __build_tree_ui(self, node_list:list, parent_item):
+        for node in node_list:
+            display_text = f"[{node['Type']}] {node['Name']}"
+
+            item = QTreeWidgetItem(parent_item, [display_text])
+
+            item.setData(0, Qt.ItemDataRole.UserRole, node["GlobalId"])
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, node["Type"])
+
+            children = node.get("Children", [])
+            if children:
+                self.__build_tree_ui(children, item)
+
+
     def __create_menu(self):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
@@ -122,8 +137,14 @@ class MainWindow(QMainWindow):
             self.h_splitter.restoreState(h_state)
 
     def __on_tree_click(self, item, column):
-        node_name = item.text(column)
-        self.bottom_panel.append(f"Clicked on: {node_name}")
+        display_text = item.text(column)
+
+        global_id = item.data(0, Qt.ItemDataRole.UserRole)
+        ifc_type = item.data(0, Qt.ItemDataRole.UserRole + 1)
+
+        self.bottom_panel.append(f"Clicked on: {display_text}")
+        self.bottom_panel.append(f"--Hide GloabalId: {global_id}")
+        self.bottom_panel.append(f"--Hide Type: {ifc_type}")
 
     def __open_file(self):
         file_path, filter_type = QFileDialog.getOpenFileName(
@@ -133,8 +154,22 @@ class MainWindow(QMainWindow):
             "IFC Files (*.ifc);;All Files (*)"
         )
 
+
         if file_path:
             self.bottom_panel.append(f"File selected: {file_path}")
+
+            self.tree.clear()
+
+            try:
+                model = ifcopenshell.open(file_path)
+
+                hierarchy_list = get_project_hierarchy(model)
+
+                self.__build_tree_ui(hierarchy_list, self.tree)
+                self.tree.expandAll()
+                self.bottom_panel.append("File is loaded and tree is build")
+            except Exception as e:
+                self.bottom_panel.append(f"Error read file: {e}")
 
     def closeEvent(self, event):
         """this method called before close app"""
