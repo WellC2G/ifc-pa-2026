@@ -59,4 +59,4 @@ def update_element_properties(model: ifcopenshell.file, global_id: str, full_dat
         return {"success": True, "message": f"Properties for '{global_id}' successfully updated."}
 
     except Exception as e:
-        return {"success": False, "error": f"Update error: {str(e)}"}
+        return {"success": False, "error": f"Update err: {str(e)}"}
