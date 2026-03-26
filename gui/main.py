@@ -3,7 +3,7 @@ from parse_core.get_data.get_project_hierarchy import get_project_hierarchy
 from parse_core.get_data.get_element_geometry import get_element_geometry
 
 import os
-os.environ["QT_QPA_PLATFORM"] = "xcb"
+os.environ["QT_QPA_PLATFORM"] = "windows"
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 
 import sys
@@ -26,7 +26,41 @@ from PyQt6.QtCore import (
     )
 from PyQt6.QtGui import QAction
 
+from PyQt6.QtCore import QThread, pyqtSignal
+
+class GeometryWorker(QThread):
+    # Создаем сигнал, который вернет словарь (dict) с результатами, когда закончит работу
+    finished_signal = pyqtSignal(dict)
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def run(self):
+        # Всё, что находится внутри метода run(), выполняется в отдельном потоке!
+        # Сюда мы переносим вашу тяжелую функцию
+        geom_data = get_element_geometry(self.model)
+        
+        # Когда генерация закончена, отправляем данные обратно в главное окно
+        self.finished_signal.emit(geom_data)
+
 class MainWindow(QMainWindow):
+    def __on_geometry_ready(self, geom_data):
+        """Этот метод вызовется автоматически, когда фоновый поток закончит расчеты"""
+        
+        if "error" in geom_data:
+            self.bottom_panel.append(f"Ошибка 3D: {geom_data['error']}")
+        else:
+            vtm_path = geom_data["file_path"]
+            elements_count = geom_data["elements_count"]
+            
+            self.bottom_panel.append(f"Геометрия создана! Элементов: {elements_count}")
+            self.bottom_panel.append(f"Файл геометрии: {vtm_path}")
+            
+            # 4. ОТПРАВЛЯЕМ ФАЙЛ ВО ВЬЮПОРТ ДЛЯ ОТРИСОВКИ
+            self.viewport.load_model(vtm_path)
+            
+            self.bottom_panel.append("Успех: Модель загружена и отрисована!")
     def __init__(self):
         # parent's constructor (QMainWindow)
         super().__init__()
@@ -178,26 +212,17 @@ class MainWindow(QMainWindow):
                 self.__build_tree_ui(hierarchy_list, self.tree)
                 self.tree.expandAll()
 
-                # 3. Извлекаем 3D-геометрию!
-                self.bottom_panel.append("Генерация 3D геометрии (это может занять время)...")
-                QApplication.processEvents()
+                # 3. Извлекаем 3D-геометрию В ФОНОВОМ ПОТОКЕ
+                self.bottom_panel.append("Генерация 3D геометрии запущена в фоне (интерфейс не зависнет!)...")
                 
-                geom_data = get_element_geometry(model)
+                # Создаем воркер и передаем ему модель
+                self.worker = GeometryWorker(model)
                 
-                # Проверяем, не вернула ли функция ошибку
-                if "error" in geom_data:
-                    self.bottom_panel.append(f"Ошибка 3D: {geom_data['error']}")
-                else:
-                    vtm_path = geom_data["file_path"]
-                    elements_count = geom_data["elements_count"]
-                    
-                    self.bottom_panel.append(f"Геометрия создана! Элементов: {elements_count}")
-                    self.bottom_panel.append(f"Файл геометрии: {vtm_path}")
-                    
-                    # 4. ОТПРАВЛЯЕМ ФАЙЛ ВО ВЬЮПОРТ ДЛЯ ОТРИСОВКИ
-                    self.viewport.load_model(vtm_path)
-                    
-                    self.bottom_panel.append("Успех: Модель загружена и отрисована!")
+                # Подключаем сигнал успешного завершения к новому методу
+                self.worker.finished_signal.connect(self.__on_geometry_ready)
+                
+                # ЗАПУСКАЕМ ПОТОК
+                self.worker.start()
 
             except Exception as e:
                 self.bottom_panel.append(f"Ошибка чтения файла: {e}")
