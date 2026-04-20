@@ -210,6 +210,8 @@ class MainWindow(QMainWindow):
         
         self.current_global_id = global_id
 
+        self.current_tree_item = item
+
         self.bottom_panel.append(f"Загрузка свойств для: {display_text}")
 
         self.current_properties = get_properties_by_global_id(self.model, global_id)
@@ -262,6 +264,18 @@ class MainWindow(QMainWindow):
             _, group_name, key = path
             self.current_properties["Properties"][group_name][key] = new_value
             self.bottom_panel.append(f"[Изменено в памяти] {group_name} -> {key} = {new_value}")
+
+            if group_name == "Element Specific" and key in ("Name", "IfcEntity"):
+                if hasattr(self, 'current_tree_item') and self.current_tree_item:
+                    props = self.current_properties["Properties"]["Element Specific"]
+                    current_name = props.get("Name", "")
+                    current_type = props.get("IfcEntity", "")
+
+                    new_display_text = f"[{current_type}] {current_name}"
+                    self.current_tree_item.setText(0, new_display_text)
+
+                    if key == "IfcEntity":
+                        self.current_tree_item.setData(0, Qt.ItemDataRole.UserRole + 1, current_type)
         
         update_result = update_element_properties(
             self.model, 
