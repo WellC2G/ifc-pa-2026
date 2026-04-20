@@ -4,6 +4,7 @@ from core.parse.get_element_geometry import get_element_geometry
 from core.parse.get_properties_by_global_id import get_properties_by_global_id
 from core.file.save_file import save_ifc_model
 from core.edit_data.edit_data import update_element_properties
+from core.edit_data.edit_hierarchy import edit_element_hierarchy
 
 import ifcopenshell
 
@@ -38,6 +39,32 @@ class GeometryWorker(QThread):
         
         self.finished_signal.emit(geom_data)
 
+
+class ProjectTreeWidget(QTreeWidget):
+    item_dropped_signal = pyqtSignal(QTreeWidgetItem, QTreeWidgetItem, str, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QTreeWidget.DragDropMode.InternalMove)
+
+    def dropEvent(self, event):
+        dragged_item = self.currentItem()
+        target_item = self.itemAt(event.position().toPoint())
+
+        if not dragged_item or not target_item or dragged_item == target_item:
+            event.ignore()
+            return
+
+        element_guid = dragged_item.data(0, Qt.ItemDataRole.UserRole)
+        parent_guid = target_item.data(0, Qt.ItemDataRole.UserRole)
+
+        if element_guid and parent_guid:
+            self.item_dropped_signal.emit(dragged_item, target_item, element_guid, parent_guid)
+
+        event.ignore()
+
 class MainWindow(QMainWindow):
     def __init__(self):
         # parent's constructor (QMainWindow)
@@ -69,8 +96,10 @@ class MainWindow(QMainWindow):
         self.h_splitter_2 = QSplitter(Qt.Orientation.Horizontal)
 
         # tree, bottom_panel and viewport NOW JUST plugs
-        self.tree = QTreeWidget()
+        self.tree = ProjectTreeWidget()
         self.tree.setHeaderLabel("Struct of IFC")
+
+        self.tree.item_dropped_signal.connect(self.__on_hierarchy_dropped)
 
         self.viewport = IFCViewport()
         # self.viewport.setStyleSheet("background-color: #333333;")
@@ -210,6 +239,8 @@ class MainWindow(QMainWindow):
         
         self.current_global_id = global_id
 
+        self.current_tree_item = item
+
         self.bottom_panel.append(f"Загрузка свойств для: {display_text}")
 
         self.current_properties = get_properties_by_global_id(self.model, global_id)
@@ -262,6 +293,18 @@ class MainWindow(QMainWindow):
             _, group_name, key = path
             self.current_properties["Properties"][group_name][key] = new_value
             self.bottom_panel.append(f"[Изменено в памяти] {group_name} -> {key} = {new_value}")
+
+            if group_name == "Element Specific" and key in ("Name", "IfcEntity"):
+                if hasattr(self, 'current_tree_item') and self.current_tree_item:
+                    props = self.current_properties["Properties"]["Element Specific"]
+                    current_name = props.get("Name", "")
+                    current_type = props.get("IfcEntity", "")
+
+                    new_display_text = f"[{current_type}] {current_name}"
+                    self.current_tree_item.setText(0, new_display_text)
+
+                    if key == "IfcEntity":
+                        self.current_tree_item.setData(0, Qt.ItemDataRole.UserRole + 1, current_type)
         
         update_result = update_element_properties(
             self.model, 
@@ -274,6 +317,32 @@ class MainWindow(QMainWindow):
         else:
             self.bottom_panel.append(f"[Core Error] Не удалось обновить IFC: {update_result.get('error')}")
 
+    def __on_hierarchy_dropped(self, dragged_item, target_item, element_guid, parent_guid):
+        if not hasattr(self, 'model'):
+            return
+
+        self.bottom_panel.append(f"Attempting to move element...")
+
+        result = edit_element_hierarchy(self.model, element_guid, parent_guid)
+
+        if result.get("success"):
+            self.bottom_panel.append(f"[Core] {result['message']}")
+
+            old_parent = dragged_item.parent()
+
+            if old_parent:
+                old_parent.takeChild(old_parent.indexOfChild(dragged_item))
+            else:
+                self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(dragged_item))
+
+            target_item.addChild(dragged_item)
+            target_item.setExpanded(True)
+
+            self.tree.clearSelection()
+            target_item.setSelected(True)
+
+        else:
+            self.bottom_panel.append(f"[Core Error] Failed to move: {result.get('error')}")
     def __open_file(self):
         file_path, filter_type = QFileDialog.getOpenFileName(
             self,

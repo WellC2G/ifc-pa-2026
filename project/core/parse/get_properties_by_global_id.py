@@ -21,7 +21,8 @@ def get_properties_by_global_id(model: ifcopenshell.file, global_id: str) -> dic
     gui_data["Properties"]["Element Specific"] = {
         "Guid": str(ifc_object.GlobalId),
         "IfcEntity": str(ifc_object.is_a()),
-        "Name": str(ifc_object.Name) if getattr(ifc_object, "Name", None) else ""
+        "Name": str(ifc_object.Name) if getattr(ifc_object, "Name", None) else "",
+        "Description": str(ifc_object.Description) if getattr(ifc_object, "Description", None) else ""
     }
 
     psets = ifcopenshell.util.element.get_psets(ifc_object)
