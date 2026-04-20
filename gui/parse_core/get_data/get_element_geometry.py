@@ -4,7 +4,6 @@ import tempfile
 import multiprocessing
 from pathlib import Path
 
-
 def get_element_geometry(model: ifcopenshell.file) -> dict:
     try:
         temp_dir = Path(tempfile.gettempdir())
@@ -17,7 +16,7 @@ def get_element_geometry(model: ifcopenshell.file) -> dict:
             brep_files = list(cache_folder.glob("*.brep"))
 
             return {
-                "file_path": str(cache_folder),
+                "dir_path": str(cache_folder),
                 "elements_count": len(brep_files)
             }
 

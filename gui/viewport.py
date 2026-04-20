@@ -1,33 +1,42 @@
+import os
+import glob
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
-import pyvista as pv
-from pyvistaqt import QtInteractor
+
+from OCC.Display.backend import load_backend
+load_backend("pyqt6")
+
+from OCC.Display.qtDisplay import qtViewer3d
+from OCC.Core.BRepTools import breptools_Read
+from OCC.Core.BRep import BRep_Builder
+from OCC.Core.TopoDS import TopoDS_Shape
 
 class IFCViewport(QWidget):
-    def __init__(self):
-        super().__init__()
-        
-        # Настраиваем слой, чтобы 3D-окно занимало всё доступное место
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Создаем встроенный 3D-вьюпорт от PyVista
-        self.plotter = QtInteractor(self)
-        self.layout.addWidget(self.plotter.interactor)
-        
-        # Настраиваем красивый темный фон
-        self.plotter.set_background("#333333")
 
-    def load_model(self, file_path: str):
-        """ Загружает .vtm файл в сцену """
-        # Очищаем сцену от старых моделей, если они были
-        self.plotter.clear()
+        self.canvas = qtViewer3d(self)
+        self.layout.addWidget(self.canvas)
         
-        # Загружаем мультиблок, который сгенерировала команда
-        multiblock = pv.read(file_path)
+        self.canvas.InitDriver()
+        self.display = self.canvas._display
+
+        self.display.set_bg_gradient_color([51, 51, 51], [51, 51, 51])
+
+    def load_model(self, dir_path: str):
+        self.display.EraseAll()
+
+        builder = BRep_Builder()
         
-        # Добавляем модель на сцену. 
-        # color="white" - базовый цвет, show_edges=True - чтобы видеть грани элементов
-        self.plotter.add_mesh(multiblock, color="#e0e0e0", show_edges=True)
-        
-        # Камера автоматически центрируется на здании
-        self.plotter.reset_camera()
+        brep_files = glob.glob(os.path.join(dir_path, "*.brep"))
+
+        for file_path in brep_files:
+            shape = TopoDS_Shape()
+            
+            breptools_Read(shape, file_path, builder)
+
+            self.display.DisplayShape(shape, update=False, color="WHITE")
+
+        self.display.FitAll()

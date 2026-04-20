@@ -50,16 +50,16 @@ class MainWindow(QMainWindow):
         if "error" in geom_data:
             self.bottom_panel.append(f"Ошибка 3D: {geom_data['error']}")
         else:
-            vtm_path = geom_data["dir_path"]
+            dir_path = geom_data["dir_path"]  # Переименовали с vtm_path для ясности
             elements_count = geom_data["elements_count"]
 
             self.bottom_panel.append(f"Геометрия создана! Элементов: {elements_count}")
-            self.bottom_panel.append(f"Файл геометрии: {vtm_path}")
+            self.bottom_panel.append(f"Папка с B-Rep геометрией: {dir_path}")
 
-            # 4. ОТПРАВЛЯЕМ ФАЙЛ ВО ВЬЮПОРТ ДЛЯ ОТРИСОВКИ
-            self.viewport.load_model(vtm_path)
+            # 4. ОТПРАВЛЯЕМ ПАПКУ ВО ВЬЮПОРТ ДЛЯ ОТРИСОВКИ
+            self.viewport.load_model(dir_path)
 
-            self.bottom_panel.append("Успех: Модель загружена и отрисована!")
+            self.bottom_panel.append("Успех: Модель загружена и отрисована в OCCT!")
     def __init__(self):
         # parent's constructor (QMainWindow)
         super().__init__()
