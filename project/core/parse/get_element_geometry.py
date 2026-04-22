@@ -68,6 +68,8 @@ def get_element_geometry(model: ifcopenshell.file) -> dict:
 
         print(f"Successfully generated {elements_count} B-Rep files.")
 
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"+str(cache_folder)+"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
         return {
             "dir_path": str(cache_folder),
             "elements_count": elements_count

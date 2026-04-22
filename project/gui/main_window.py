@@ -84,6 +84,13 @@ class MainWindow(QMainWindow):
         # load settings (AFTER BUILD ALL WIDGETS)
         self.__restore_settings()
 
+        self.setStyleSheet("""
+            QWidget {
+                background-color: palette(Window);
+                color: palette(WindowText);
+            }
+        """)
+
     def __init_ui(self):
         # two main widget
         main_widget = QWidget()
@@ -102,7 +109,7 @@ class MainWindow(QMainWindow):
         self.tree.item_dropped_signal.connect(self.__on_hierarchy_dropped)
 
         self.viewport = IFCViewport()
-        # self.viewport.setStyleSheet("background-color: #333333;")
+        #self.viewport.setStyleSheet("background-color: #333333;")
 
         self.bottom_panel = QTextEdit()
         self.bottom_panel.setPlaceholderText("Place for logs")
@@ -168,11 +175,80 @@ class MainWindow(QMainWindow):
     def __create_menu(self):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
+        settings_menu = menu_bar.addMenu("Settings")
+
+        theme_menu = settings_menu.addMenu("Theme")
+        
+        self.themes = {
+            "Light": "background-color: #f0f0f0; color: black;",
+            "Dark": """
+                QMainWindow, QWidget {
+                background-color: #1e1e1e; /* Темно-серый фон */
+                color: #d4d4d4; /* Светло-серый/белый текст */
+            }
+
+            QTreeView, QTextEdit, QTableView {
+                background-color: #252526;
+                border: 1px solid #3c3c3c;
+                gridline-color: #3c3c3c;
+            }
+
+            QHeaderView::section {
+                background-color: #2d2d30;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+            }
+
+            QPushButton {
+                background-color: #333333;
+                color: #ffffff;
+                border: 1px solid #555555;
+                border-radius: 4px;
+            }
+
+            QPushButton:hover {
+                background-color: #444444;
+                border: 1px solid #888888;
+            }
+
+            QPushButton:pressed {
+                background-color: #222222;
+            }
+            
+            QScrollBar:vertical {
+                border: none;
+                background: #1e1e1e;
+                width: 14px;
+                margin: 0px 0px 0px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #424242;
+                min-height: 20px;
+                border-radius: 7px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #4f4f4f;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
+            }
+            """,
+        }
 
         open_action = QAction("Open", self)
         save_action = QAction("Save", self)
         exit_action = QAction("Exit", self)
         
+
+        for theme_name in self.themes.keys():
+            action = QAction(theme_name, self)
+            
+            # Используем ту самую правильную лямбду с сохранением имени
+            action.triggered.connect(lambda checked, name=theme_name: self.change_theme(name))
+            
+            # Добавляем действие (цвет) в подменю Theme
+            theme_menu.addAction(action)
 
         exit_action.triggered.connect(self.close)
         open_action.triggered.connect(self.__open_file)
@@ -181,6 +257,11 @@ class MainWindow(QMainWindow):
         file_menu.addAction(open_action)
         file_menu.addAction(save_action)
         file_menu.addAction(exit_action)
+    
+    def change_theme(self, theme_name):
+        style = self.themes.get(theme_name, "")
+        self.setStyleSheet(style)
+        print(f"Применена тема: {theme_name}")
 
     def __save_file(self):
         # Проверяем, есть ли что сохранять
