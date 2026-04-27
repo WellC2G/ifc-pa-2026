@@ -14,6 +14,8 @@ from OCC.Core.BRepBndLib import brepbndlib
 
 load_backend("pyqt6")
 
+from OCC.Core.gp import gp_Vec, gp_Trsf
+from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Display.qtDisplay import qtViewer3d
 from OCC.Core.BRepTools import breptools
 from OCC.Core.BRep import BRep_Builder
@@ -32,16 +34,32 @@ class IFCViewport(QWidget):
         self.canvas = qtViewer3d(self)
         self.layout.addWidget(self.canvas)
 
-        self.canvas.InitDriver()
-        self.display = self.canvas._display
-
-        self.display.set_bg_gradient_color([51, 51, 51], [51, 51, 51])
-
         self.ais_dict = {}
         self._is_updating_selection = False
 
+        # === ПЕРЕМЕННЫЕ ДЛЯ ПЕРЕТАСКИВАНИЯ ===
+        self._is_object_dragging = False
+        self._dragged_ais = None
+        self._drag_start_x3d = 0.0
+        self._drag_start_y3d = 0.0
+        self._drag_start_z3d = 0.0
+        self._original_location = None
+
+        # === ФЛАГ ИНИЦИАЛИЗАЦИИ ОКНА (исправление ошибки) ===
+        self._is_configured = False
+
+        # === ПЕРЕХВАТ СОБЫТИЙ МЫШИ ===
         self._original_mouseDoubleClickEvent = self.canvas.mouseDoubleClickEvent
         self.canvas.mouseDoubleClickEvent = self.on_canvas_double_click
+
+        self._original_mousePressEvent = self.canvas.mousePressEvent
+        self.canvas.mousePressEvent = self.on_canvas_mouse_press
+
+        self._original_mouseMoveEvent = self.canvas.mouseMoveEvent
+        self.canvas.mouseMoveEvent = self.on_canvas_mouse_move
+
+        self._original_mouseReleaseEvent = self.canvas.mouseReleaseEvent
+        self.canvas.mouseReleaseEvent = self.on_canvas_mouse_release
 
         self.cx = 0.0
         self.cy = 0.0
@@ -49,10 +67,20 @@ class IFCViewport(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.canvas.InitDriver()
+        
+        # Проверяем, инициализировал ли qtViewer3d сам себя
+        if not hasattr(self.canvas, '_display') or self.canvas._display is None:
+            self.canvas.InitDriver()
+
+        # Настраиваем фон и сохраняем ссылку на display только один раз
+        if not self._is_configured:
+            self.display = self.canvas._display
+            if self.display:
+                self.display.set_bg_gradient_color([51, 51, 51], [51, 51, 51])
+                self.display.FitAll()
+                self._is_configured = True
+                
         self.canvas.update()
-        if hasattr(self, 'display'):
-            self.display.FitAll()
 
     def load_model(self, dir_path: str):
         self.display.EraseAll()
@@ -140,3 +168,64 @@ class IFCViewport(QWidget):
             self.display.Context.ClearSelected(True)
 
         self._is_updating_selection = False
+    def on_canvas_mouse_press(self, event):
+        # Если зажат Ctrl и левая кнопка мыши — инициируем перетаскивание
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.button() == Qt.MouseButton.LeftButton:
+            x, y = event.pos().x(), event.pos().y()
+            
+            # Проверяем, есть ли объект под курсором
+            self.display.Context.MoveTo(x, y, self.display.View, True)
+            if self.display.Context.HasDetected():
+                self._dragged_ais = self.display.Context.DetectedInteractive()
+                self._is_object_dragging = True
+                
+                # ИСПРАВЛЕНИЕ: Используем ConvertWithProj и забираем только первые 3 значения
+                self._drag_start_x3d, self._drag_start_y3d, self._drag_start_z3d, _, _, _ = self.display.View.ConvertWithProj(x, y)
+                
+                # Запоминаем исходную трансформацию объекта через Контекст
+                if self.display.Context.HasLocation(self._dragged_ais):
+                    self._original_location = self.display.Context.Location(self._dragged_ais)
+                else:
+                    self._original_location = TopLoc_Location()
+
+        # Стандартное поведение (вращение камеры)
+        self._original_mousePressEvent(event)
+
+    def on_canvas_mouse_move(self, event):
+        # Если мы в режиме перетаскивания объекта
+        if self._is_object_dragging and self._dragged_ais:
+            x, y = event.pos().x(), event.pos().y()
+            
+            # ИСПРАВЛЕНИЕ: Используем ConvertWithProj
+            curr_x3d, curr_y3d, curr_z3d, _, _, _ = self.display.View.ConvertWithProj(x, y)
+            
+            # Вычисляем вектор смещения в 3D
+            dx = curr_x3d - self._drag_start_x3d
+            dy = curr_y3d - self._drag_start_y3d
+            dz = curr_z3d - self._drag_start_z3d
+            
+            # Создаем матрицу параллельного переноса
+            translation = gp_Trsf()
+            translation.SetTranslation(gp_Vec(dx, dy, dz))
+            
+            # Накладываем новое смещение на ОРИГИНАЛЬНОЕ положение объекта
+            new_loc = TopLoc_Location(translation) * self._original_location
+            
+            # Применяем к визуальному элементу и обновляем экран
+            self.display.Context.SetLocation(self._dragged_ais, new_loc)
+            self.display.Context.UpdateCurrentViewer()
+            return
+
+        # Стандартное поведение
+        self._original_mouseMoveEvent(event)
+
+    def on_canvas_mouse_release(self, event):
+        # Завершаем перетаскивание
+        if self._is_object_dragging:
+            self._is_object_dragging = False
+            self._dragged_ais = None
+            self._original_location = None
+            return
+            
+        # Стандартное поведение
+        self._original_mouseReleaseEvent(event)

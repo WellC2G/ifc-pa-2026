@@ -114,6 +114,9 @@ class MainWindow(QMainWindow):
         self.property_tree.setAlternatingRowColors(True)
 
         # add plugs to splitter
+        self.viewport.setMinimumSize(200, 200) 
+
+        # add plugs to splitter
         self.h_splitter.addWidget(self.tree)
         self.h_splitter.addWidget(self.viewport)
 
@@ -125,6 +128,11 @@ class MainWindow(QMainWindow):
 
         # set default size on first open
         self.v_splitter.setSizes([500, 100])
+        
+        # ДОБАВЛЕНО: Явно задаем размеры для горизонтальных сплиттеров 
+        # (Дерево: 200px, Viewport: 600px)
+        self.h_splitter.setSizes([200, 600]) 
+        self.h_splitter_2.setSizes([600, 200])
 
         # add all to main widgets
         main_layout.addWidget(self.v_splitter)
