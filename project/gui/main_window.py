@@ -53,6 +53,17 @@ class ProjectTreeWidget(QTreeWidget):
         self.setAcceptDrops(True)
         self.setDragDropMode(QTreeWidget.DragDropMode.InternalMove)
 
+        self.setAutoScroll(True)
+        self.setAutoScrollMargin(30)
+
+    def dragEnterEvent(self, event):
+        super().dragEnterEvent(event)
+        event.accept()
+
+    def dragMoveEvent(self, event):
+        super().dragMoveEvent(event)
+        event.accept()
+
     def dropEvent(self, event):
         dragged_item = self.currentItem()
         target_item = self.itemAt(event.position().toPoint())
@@ -485,6 +496,8 @@ class MainWindow(QMainWindow):
         if result.get("success"):
             self.bottom_panel.append(f"[Core] {result['message']}")
 
+            self.tree.setUpdatesEnabled(False)
+
             old_parent = dragged_item.parent()
 
             if old_parent:
@@ -496,7 +509,10 @@ class MainWindow(QMainWindow):
             target_item.setExpanded(True)
 
             self.tree.clearSelection()
-            target_item.setSelected(True)
+            dragged_item.setSelected(True)
+            self.tree.scrollToItem(dragged_item)
+
+            self.tree.setUpdatesEnabled(True)
 
         else:
             self.bottom_panel.append(f"[Core Error] Failed to move: {result.get('error')}")
