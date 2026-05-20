@@ -12,7 +12,8 @@ from OCC.Core.Quantity import (
     Quantity_Color, 
     Quantity_NOC_GOLDENROD,
     Quantity_NOC_ORANGE,
-    Quantity_NOC_RED
+    Quantity_NOC_RED,
+    Quantity_NOC_WHITE
 )
 from OCC.Core.Prs3d import Prs3d_LineAspect
 from OCC.Core.Aspect import Aspect_TOL_SOLID
@@ -92,6 +93,37 @@ class IFCViewport(QWidget):
             self.display = self.canvas._display
             if self.display:
                 self.display.set_bg_gradient_color([51, 51, 51], [51, 51, 51])
+                
+                # --- УЛУЧШЕННОЕ ВЫДЕЛЕНИЕ (Highlighting) ---
+                context = self.display.Context
+                
+                # 1. Стиль при наведении (Highlight) - Золотистый полупрозрачный
+                hi_style = context.HighlightStyle()
+                hi_style.SetColor(Quantity_Color(Quantity_NOC_WHITE))
+                hi_style.SetTransparency(0.3)
+                try:
+                    # Устанавливаем метод подсвечивания цветом (Prs3d_TOH_Color = 1)
+                    hi_style.SetMethod(1) 
+                except Exception:
+                    pass
+                context.SetHighlightStyle(hi_style)
+                
+                # 2. Стиль при выборе (Selection) - Ярко-белый
+                sel_style = context.SelectionStyle()
+                sel_style.SetColor(Quantity_Color(Quantity_NOC_WHITE))
+                sel_style.SetTransparency(0.0)
+                try:
+                    sel_style.SetMethod(1) # Prs3d_TOH_Color
+                except Exception:
+                    pass
+                
+                # Настройка границ для выделенного объекта (чтобы перекрывали циановые границы)
+                sel_style.SetFaceBoundaryDraw(True)
+                sel_aspect = Prs3d_LineAspect(Quantity_Color(Quantity_NOC_WHITE), Aspect_TOL_SOLID, 2.5)
+                sel_style.SetFaceBoundaryAspect(sel_aspect)
+                
+                context.SetSelectionStyle(sel_style)
+                
                 self.display.FitAll()
                 self._is_configured = True
 
