@@ -1,5 +1,6 @@
 import os
 import glob
+import concurrent.futures
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 
@@ -21,6 +22,12 @@ from OCC.Core.BRepTools import breptools
 from OCC.Core.BRep import BRep_Builder
 from OCC.Core.TopoDS import TopoDS_Shape
 
+
+def _load_brep_file(file_path):
+    builder = BRep_Builder()
+    shape = TopoDS_Shape()
+    breptools.Read(shape, file_path, builder)
+    return file_path, shape
 
 class IFCViewport(QWidget):
     element_selected_signal = pyqtSignal(str)
@@ -69,7 +76,7 @@ class IFCViewport(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        
+
         # Проверяем, инициализировал ли qtViewer3d сам себя
         if not hasattr(self.canvas, '_display') or self.canvas._display is None:
             self.canvas.InitDriver()
@@ -81,7 +88,7 @@ class IFCViewport(QWidget):
                 self.display.set_bg_gradient_color([51, 51, 51], [51, 51, 51])
                 self.display.FitAll()
                 self._is_configured = True
-                
+
         self.canvas.update()
 
     def load_model(self, dir_path: str):
@@ -225,11 +232,11 @@ class IFCViewport(QWidget):
 
                 moved_guid = None
                 for ais, guid in self.ais_dict.items():
-                    if str(ais.this) == str(self._dragged_ais.this):
+                    if str(ais.this) == str(self._dragged_ais.this) or ais == self._dragged_ais:
                         moved_guid = guid
                         break
 
-                if moved_guid and (self._last_dx != 0 or self._last_dy != 0 or self._last_dz != 0):
+                if moved_guid and (abs(self._last_dx) > 1e-8 or abs(self._last_dy) > 1e-8 or abs(self._last_dz) > 1e-8):
                     self.element_moved_signal.emit(moved_guid, self._last_dx, self._last_dy, self._last_dz)
 
             # Сбрасываем флаги
@@ -242,3 +249,5 @@ class IFCViewport(QWidget):
             return
 
         self._original_mouseReleaseEvent(event)
+        self._last_dz = 0.0
+        return

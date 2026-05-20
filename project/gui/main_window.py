@@ -1,5 +1,7 @@
 import os
 import shutil
+import tempfile
+from pathlib import Path
 
 from gui.viewport import IFCViewport
 from core.parse.get_project_hierarchy import get_project_hierarchy
@@ -12,24 +14,25 @@ from core.edit_data.edit_placement import move_ifc_element
 
 import ifcopenshell
 
-from PyQt6.QtWidgets import ( 
-    QApplication, 
-    QWidget, 
-    QVBoxLayout, 
+from PyQt6.QtWidgets import (
+    QApplication,
+    QWidget,
+    QVBoxLayout,
     QTreeWidget,
-    QMainWindow, 
+    QMainWindow,
     QSplitter,
     QTextEdit,
     QFileDialog,
     QTreeWidgetItem
-    )
+)
 from PyQt6.QtCore import (
     QThread,
     Qt,
     QSettings,
     pyqtSignal,
-    )
+)
 from PyQt6.QtGui import QAction
+
 
 class GeometryWorker(QThread):
     finished_signal = pyqtSignal(dict)
@@ -40,7 +43,7 @@ class GeometryWorker(QThread):
 
     def run(self):
         geom_data = get_element_geometry(self.model)
-        
+
         self.finished_signal.emit(geom_data)
 
 
@@ -79,6 +82,7 @@ class ProjectTreeWidget(QTreeWidget):
             self.item_dropped_signal.emit(dragged_item, target_item, element_guid, parent_guid)
 
         event.ignore()
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -119,7 +123,7 @@ class MainWindow(QMainWindow):
         self.tree.item_dropped_signal.connect(self.__on_hierarchy_dropped)
 
         self.viewport = IFCViewport()
-        #self.viewport.setStyleSheet("background-color: #333333;")
+        # self.viewport.setStyleSheet("background-color: #333333;")
 
         self.bottom_panel = QTextEdit()
         self.bottom_panel.setPlaceholderText("Place for logs")
@@ -129,7 +133,7 @@ class MainWindow(QMainWindow):
         self.property_tree.setAlternatingRowColors(True)
 
         # add plugs to splitter
-        self.viewport.setMinimumSize(200, 200) 
+        self.viewport.setMinimumSize(200, 200)
 
         # add plugs to splitter
         self.h_splitter.addWidget(self.tree)
@@ -143,10 +147,10 @@ class MainWindow(QMainWindow):
 
         # set default size on first open
         self.v_splitter.setSizes([500, 100])
-        
-        # ДОБАВЛЕНО: Явно задаем размеры для горизонтальных сплиттеров 
+
+        # ДОБАВЛЕНО: Явно задаем размеры для горизонтальных сплиттеров
         # (Дерево: 200px, Viewport: 600px)
-        self.h_splitter.setSizes([200, 600]) 
+        self.h_splitter.setSizes([200, 600])
         self.h_splitter_2.setSizes([600, 200])
 
         # add all to main widgets
@@ -177,8 +181,9 @@ class MainWindow(QMainWindow):
         self.property_tree.itemChanged.connect(self.__on_property_edited)
 
         self.viewport.element_selected_signal.connect(self.__on_viewport_element_selected)
+        self.viewport.element_moved_signal.connect(self.__on_element_moved)
 
-    def __build_tree_ui(self, node_list:list, parent_item):
+    def __build_tree_ui(self, node_list: list, parent_item):
         for node in node_list:
             display_text = f"[{node['Type']}] {node['Name']}"
 
@@ -190,7 +195,6 @@ class MainWindow(QMainWindow):
             children = node.get("Children", [])
             if children:
                 self.__build_tree_ui(children, item)
-
 
     def __create_menu(self):
         menu_bar = self.menuBar()
@@ -313,14 +317,13 @@ class MainWindow(QMainWindow):
         open_action = QAction("Open", self)
         save_action = QAction("Save", self)
         exit_action = QAction("Exit", self)
-        
 
         for theme_name in self.themes.keys():
             action = QAction(theme_name, self)
-            
+
             # Используем ту самую правильную лямбду с сохранением имени
             action.triggered.connect(lambda checked, name=theme_name: self.change_theme(name))
-            
+
             # Добавляем действие (цвет) в подменю Theme
             theme_menu.addAction(action)
 
@@ -331,7 +334,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(open_action)
         file_menu.addAction(save_action)
         file_menu.addAction(exit_action)
-    
+
     def change_theme(self, theme_name):
         style = self.themes.get(theme_name, "")
         self.setStyleSheet(style)
@@ -360,9 +363,9 @@ class MainWindow(QMainWindow):
                 try:
                     projects = self.model.by_type("IfcProject")
                     project_id = projects[0].GlobalId if projects else "unknown_project"
-                    cache_dir = f"C:/ifc_cache/ifc_brep_{project_id}"
+                    cache_dir = Path(tempfile.gettempdir()) / f"ifc_brep_{project_id}"
 
-                    if os.path.exists(cache_dir):
+                    if cache_dir.exists():
                         shutil.rmtree(cache_dir)
                         self.bottom_panel.append(
                             "Сброс кэша геометрии выполнен. При следующем открытии модель будет перестроена.")
@@ -371,13 +374,12 @@ class MainWindow(QMainWindow):
             else:
                 self.bottom_panel.append(f"Ошибка сохранения: {result.get('error')}")
 
-
     def __restore_settings(self):
         """mehtod for save size window and splitters"""
         geometry = self.settings.value("geometry")
         if geometry:
             self.restoreGeometry(geometry)
-        
+
         v_state = self.settings.value("v_splitter_state")
         if v_state:
             self.v_splitter.restoreState(v_state)
@@ -404,7 +406,7 @@ class MainWindow(QMainWindow):
             return
 
         self.viewport.select_and_rotate(global_id)
-        
+
         self.current_global_id = global_id
 
         self.current_tree_item = item
@@ -419,30 +421,30 @@ class MainWindow(QMainWindow):
         props = self.current_properties.get("Properties", {})
         if props:
             props_root = QTreeWidgetItem(self.property_tree, ["Properties", ""])
-            
+
             for group_name, group_data in props.items():
                 group_node = QTreeWidgetItem(props_root, [str(group_name), ""])
-                
+
                 for key, value in group_data.items():
-                    row = QTreeWidgetItem(group_node,[str(key), str(value)])
+                    row = QTreeWidgetItem(group_node, [str(key), str(value)])
 
                     row.setFlags(row.flags() | Qt.ItemFlag.ItemIsEditable)
 
                     row.setData(0, Qt.ItemDataRole.UserRole, ("Properties", group_name, key))
 
-        classifications = self.current_properties.get("Classification",[])
+        classifications = self.current_properties.get("Classification", [])
         if classifications:
             class_root = QTreeWidgetItem(self.property_tree, ["Classification", ""])
             for idx, cls in enumerate(classifications):
-                cls_node = QTreeWidgetItem(class_root,[f"Class {idx+1}: {cls.get('Name', '')}", ""])
+                cls_node = QTreeWidgetItem(class_root, [f"Class {idx + 1}: {cls.get('Name', '')}", ""])
                 for key, value in cls.items():
-                    QTreeWidgetItem(cls_node,[str(key), str(value)]) # Без флага Editable
+                    QTreeWidgetItem(cls_node, [str(key), str(value)])  # Без флага Editable
 
         relations = self.current_properties.get("Relations", [])
         if relations:
-            rel_root = QTreeWidgetItem(self.property_tree,["Relations", ""])
+            rel_root = QTreeWidgetItem(self.property_tree, ["Relations", ""])
             for rel in relations:
-                QTreeWidgetItem(rel_root,[str(rel.get("Type", "")), str(rel.get("Name", ""))])
+                QTreeWidgetItem(rel_root, [str(rel.get("Type", "")), str(rel.get("Name", ""))])
 
         self.property_tree.expandAll()
         self.property_tree.blockSignals(False)
@@ -453,7 +455,7 @@ class MainWindow(QMainWindow):
 
         path = item.data(0, Qt.ItemDataRole.UserRole)
         if not path:
-            return 
+            return
 
         new_value = item.text(1)
 
@@ -473,10 +475,10 @@ class MainWindow(QMainWindow):
 
                     if key == "IfcEntity":
                         self.current_tree_item.setData(0, Qt.ItemDataRole.UserRole + 1, current_type)
-        
+
         update_result = update_element_properties(
-            self.model, 
-            self.current_global_id, 
+            self.model,
+            self.current_global_id,
             self.current_properties
         )
 
@@ -516,6 +518,7 @@ class MainWindow(QMainWindow):
 
         else:
             self.bottom_panel.append(f"[Core Error] Failed to move: {result.get('error')}")
+
     def __open_file(self):
         file_path, filter_type = QFileDialog.getOpenFileName(
             self,
@@ -530,7 +533,8 @@ class MainWindow(QMainWindow):
 
             try:
                 self.bottom_panel.append("Чтение IFC файла...")
-                QApplication.processEvents() 
+                QApplication.processEvents()
+                self.current_file_path = file_path
                 self.model = ifcopenshell.open(file_path)
 
                 self.bottom_panel.append("Построение дерева проекта...")
@@ -540,7 +544,7 @@ class MainWindow(QMainWindow):
                 self.tree.expandAll()
 
                 self.bottom_panel.append("Генерация 3D геометрии в фоновом потоке...")
-                
+
                 self.geom_worker = GeometryWorker(self.model)
                 self.geom_worker.finished_signal.connect(self.__on_geometry_loaded)
                 self.geom_worker.start()
@@ -554,7 +558,7 @@ class MainWindow(QMainWindow):
         else:
             brep_path = geom_data["dir_path"]
             elements_count = geom_data["elements_count"]
-            
+
             self.bottom_panel.append(f"Геометрия создана! Элементов: {elements_count}")
             # Передаем файл во вьюпорт
             self.viewport.load_model(brep_path)
@@ -593,12 +597,13 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'model'):
             return
 
-        self.bottom_panel.append(f"Перемещение объекта {guid} на вектор: [{dx:.2f}, {dy:.2f}, {dz:.2f}]")
+        self.bottom_panel.append(f"Перемещение объекта {guid} на вектор: [{dx:.2f}, {dy:.2f}, {dz:.2f}] м")
 
         result = move_ifc_element(self.model, guid, dx, dy, dz)
 
         if result.get("success"):
             self.bottom_panel.append(f"[Core] {result['message']}")
+            self.bottom_panel.append("[INFO] Изменения в памяти. Сохраните файл для обновления 3D-кэша.")
         else:
             self.bottom_panel.append(f"[Core Error] {result.get('error')}")
 
