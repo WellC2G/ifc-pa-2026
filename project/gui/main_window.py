@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 from gui.viewport import IFCViewport
+from gui.find_edit_tool import FindEditWindow
 from core.parse.get_project_hierarchy import get_project_hierarchy
 from core.parse.get_element_geometry import get_element_geometry
 from core.parse.get_properties_by_global_id import get_properties_by_global_id
@@ -199,9 +200,15 @@ class MainWindow(QMainWindow):
     def __create_menu(self):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
+        tools_menu = menu_bar.addMenu("Tools")
         settings_menu = menu_bar.addMenu("Settings")
 
         theme_menu = settings_menu.addMenu("Theme")
+        
+        # Tools menu actions
+        find_edit_action = QAction("Find and Edit", self)
+        find_edit_action.triggered.connect(self.__on_find_edit_tool)
+        tools_menu.addAction(find_edit_action)
 
         self.themes = {
             "Light": """
@@ -339,6 +346,27 @@ class MainWindow(QMainWindow):
         style = self.themes.get(theme_name, "")
         self.setStyleSheet(style)
         print(f"Применена тема: {theme_name}")
+
+    def __on_find_edit_tool(self):
+        if not hasattr(self, 'model'):
+            self.bottom_panel.append("Ошибка: Сначала откройте IFC файл.")
+            return
+
+        # Create the tool window if it doesn't exist or show it
+        if not hasattr(self, 'find_edit_window') or self.find_edit_window is None:
+            self.find_edit_window = FindEditWindow(self.model)
+            self.find_edit_window.element_selected_signal.connect(self.__on_viewport_element_selected)
+            self.find_edit_window.properties_updated_signal.connect(self.__on_external_properties_update)
+        
+        self.find_edit_window.show()
+        self.find_edit_window.raise_()
+        self.find_edit_window.activateWindow()
+
+    def __on_external_properties_update(self):
+        self.bottom_panel.append("[INFO] Пакетное обновление свойств завершено.")
+        # Optionally refresh the property tree if the currently selected element was part of the batch
+        if hasattr(self, 'current_tree_item') and self.current_tree_item:
+            self.__on_tree_double_click(self.current_tree_item, 0)
 
     def __save_file(self):
         # Проверяем, есть ли что сохранять
