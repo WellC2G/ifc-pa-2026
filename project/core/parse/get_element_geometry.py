@@ -3,6 +3,7 @@ import ifcopenshell.geom
 import tempfile
 import multiprocessing
 import concurrent.futures
+import json
 from pathlib import Path
 
 def get_element_geometry(model: ifcopenshell.file) -> dict:
@@ -11,11 +12,11 @@ def get_element_geometry(model: ifcopenshell.file) -> dict:
         projects = model.by_type("IfcProject")
         project_id = projects[0].GlobalId if projects else "unknown_project"
         cache_folder = temp_dir / f"ifc_brep_{project_id}"
+        meta_file = cache_folder / "meta.json"
 
         if cache_folder.exists() and any(cache_folder.iterdir()):
             print(f"B-Rep cache found: {cache_folder}")
             brep_files = list(cache_folder.glob("*.brep"))
-
             return {
                 "dir_path": str(cache_folder),
                 "elements_count": len(brep_files)
@@ -27,6 +28,11 @@ def get_element_geometry(model: ifcopenshell.file) -> dict:
         print(f"Model unit scale: {unit_scale}")
 
         cache_folder.mkdir(parents=True, exist_ok=True)
+        
+        # Сохраняем unit_scale для Viewport
+        with open(meta_file, "w", encoding="utf-8") as f:
+            json.dump({"unit_scale": unit_scale}, f)
+
         settings = ifcopenshell.geom.settings()
         settings.set("use-world-coords", True)
         settings.set("iterator-output", ifcopenshell.ifcopenshell_wrapper.SERIALIZED)
@@ -60,47 +66,6 @@ def get_element_geometry(model: ifcopenshell.file) -> dict:
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(data)
 
-        # Функция для масштабирования BREP если нужно
-        from OCC.Core.gp import gp_Trsf, gp_Pnt
-        from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
-        from OCC.Core.BRepTools import breptools
-        from OCC.Core.BRep import BRep_Builder
-        from OCC.Core.TopoDS import TopoDS_Shape
-        import io
-
-        def scale_shape_to_meters(brep_data, scale):
-            if abs(scale - 1.0) < 1e-9:
-                return brep_data
-            
-            builder = BRep_Builder()
-            shape = TopoDS_Shape()
-            
-            # Читаем из строки
-            with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.brep') as tmp:
-                tmp.write(brep_data)
-                tmp_path = tmp.name
-            
-            try:
-                breptools.Read(shape, tmp_path, builder)
-                
-                trsf = gp_Trsf()
-                trsf.SetScale(gp_Pnt(0,0,0), scale)
-                
-                transformed_shape = BRepBuilderAPI_Transform(shape, trsf).Shape()
-                
-                with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.brep') as tmp2:
-                    tmp2_path = tmp2.name
-                
-                breptools.Write(transformed_shape, tmp2_path)
-                with open(tmp2_path, 'r') as f:
-                    new_data = f.read()
-                
-                Path(tmp_path).unlink(missing_ok=True)
-                Path(tmp2_path).unlink(missing_ok=True)
-                return new_data
-            except:
-                return brep_data
-
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_cores) as executor:
             futures = []
             while True:
@@ -110,11 +75,9 @@ def get_element_geometry(model: ifcopenshell.file) -> dict:
                 brep_string = shape.geometry.brep_data
 
                 if brep_string:
-                    # МАСШТАБИРУЕМ В МЕТРЫ ПЕРЕД ЗАПИСЬЮ
-                    final_brep = scale_shape_to_meters(brep_string, unit_scale)
-                    
                     file_path = cache_folder / f"{global_id}.brep"
-                    futures.append(executor.submit(write_brep, file_path, final_brep))
+                    # Прямая запись на диск без двойного парсинга
+                    futures.append(executor.submit(write_brep, file_path, brep_string))
                     elements_count += 1
 
                 if not iterator.next():
