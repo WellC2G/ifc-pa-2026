@@ -6,6 +6,7 @@ from pathlib import Path
 from gui.viewport import IFCViewport
 from gui.find_edit_tool import FindEditWindow
 from core.parse.get_project_hierarchy import get_project_hierarchy
+from core.manager.command_manager import CommandManager, MoveCommand, PropertyEditCommand, HierarchyCommand
 from core.parse.get_element_geometry import get_element_geometry
 from core.parse.get_properties_by_global_id import get_properties_by_global_id
 from core.file.save_file import save_ifc_model
@@ -24,7 +25,8 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QTextEdit,
     QFileDialog,
-    QTreeWidgetItem
+    QTreeWidgetItem,
+    QStyle
 )
 from PyQt6.QtCore import (
     QThread,
@@ -97,9 +99,13 @@ class MainWindow(QMainWindow):
         # initialization settings for load settings after last close
         self.settings = QSettings("Degustation", "IFCEditor")
 
+        # Initialize Command Manager for Undo/Redo
+        self.command_manager = CommandManager()
+
         # build main interface
         self.__init_ui()
         self.__create_menu()
+        self.__create_toolbar()
 
         # load settings (AFTER BUILD ALL WIDGETS)
         self.__restore_settings()
@@ -200,17 +206,30 @@ class MainWindow(QMainWindow):
     def __create_menu(self):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
+        edit_menu = menu_bar.addMenu("Edit")
         tools_menu = menu_bar.addMenu("Tools")
         settings_menu = menu_bar.addMenu("Settings")
 
         theme_menu = settings_menu.addMenu("Theme")
-        
+
+        # Edit menu actions
+        self.undo_action = QAction("Undo", self)
+        self.undo_action.setShortcut("Ctrl+Z")
+        self.undo_action.triggered.connect(self.__undo)
+        edit_menu.addAction(self.undo_action)
+
+        self.redo_action = QAction("Redo", self)
+        self.redo_action.setShortcut("Ctrl+Y")
+        self.redo_action.triggered.connect(self.__redo)
+        edit_menu.addAction(self.redo_action)
+
         # Tools menu actions
         find_edit_action = QAction("Find and Edit", self)
         find_edit_action.triggered.connect(self.__on_find_edit_tool)
         tools_menu.addAction(find_edit_action)
 
         self.themes = {
+
             "Light": """
                 QMainWindow, QWidget {
                     background-color: #f3f3f3; /* Светло-серый фон приложения */
@@ -342,6 +361,70 @@ class MainWindow(QMainWindow):
         file_menu.addAction(save_action)
         file_menu.addAction(exit_action)
 
+    def __create_toolbar(self):
+        toolbar = self.addToolBar("Actions")
+        
+        undo_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack)
+        redo_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowForward)
+        
+        self.toolbar_undo = QAction(undo_icon, "Undo", self)
+        self.toolbar_undo.triggered.connect(self.__undo)
+        toolbar.addAction(self.toolbar_undo)
+        
+        self.toolbar_redo = QAction(redo_icon, "Redo", self)
+        self.toolbar_redo.triggered.connect(self.__redo)
+        toolbar.addAction(self.toolbar_redo)
+        
+        self.__update_undo_redo_actions()
+
+    def __undo(self):
+        result = self.command_manager.undo()
+        if result.get("success"):
+            self.bottom_panel.append(f"[Undo] {result.get('message', 'Action undone')}")
+            self.__update_undo_redo_actions()
+            command = result.get("command")
+            if command and command.element_guid:
+                self.__on_viewport_element_selected(command.element_guid)
+        else:
+            self.bottom_panel.append(f"[Undo Error] {result.get('error')}")
+
+    def __redo(self):
+        result = self.command_manager.redo()
+        if result.get("success"):
+            self.bottom_panel.append(f"[Redo] {result.get('message', 'Action redone')}")
+            self.__update_undo_redo_actions()
+            command = result.get("command")
+            if command and command.element_guid:
+                self.__on_viewport_element_selected(command.element_guid)
+        else:
+            self.bottom_panel.append(f"[Redo Error] {result.get('error')}")
+
+    def __update_undo_redo_actions(self):
+        can_undo = self.command_manager.can_undo()
+        can_redo = self.command_manager.can_redo()
+        
+        self.undo_action.setEnabled(can_undo)
+        self.toolbar_undo.setEnabled(can_undo)
+        self.redo_action.setEnabled(can_redo)
+        self.toolbar_redo.setEnabled(can_redo)
+
+    def __update_hierarchy_ui(self, element_guid, new_parent_guid):
+        # Helper to move items in the tree UI without triggering business logic again
+        item = self.__find_item_by_guid(self.tree.invisibleRootItem(), element_guid)
+        target_parent = self.__find_item_by_guid(self.tree.invisibleRootItem(), new_parent_guid)
+        
+        if item and target_parent:
+            self.tree.setUpdatesEnabled(False)
+            old_parent = item.parent() or self.tree.invisibleRootItem()
+            # SAFE WAY to move item without garbage collection crash:
+            idx = old_parent.indexOfChild(item)
+            if idx >= 0:
+                taken_item = old_parent.takeChild(idx)
+                target_parent.addChild(taken_item)
+                target_parent.setExpanded(True)
+                self.tree.scrollToItem(taken_item)
+            self.tree.setUpdatesEnabled(True)
+
     def change_theme(self, theme_name):
         style = self.themes.get(theme_name, "")
         self.setStyleSheet(style)
@@ -354,7 +437,7 @@ class MainWindow(QMainWindow):
 
         # Create the tool window if it doesn't exist or show it
         if not hasattr(self, 'find_edit_window') or self.find_edit_window is None:
-            self.find_edit_window = FindEditWindow(self.model)
+            self.find_edit_window = FindEditWindow(self.model, self.command_manager, self.tree)
             self.find_edit_window.element_selected_signal.connect(self.__on_viewport_element_selected)
             self.find_edit_window.properties_updated_signal.connect(self.__on_external_properties_update)
         
@@ -489,63 +572,57 @@ class MainWindow(QMainWindow):
 
         if len(path) == 3 and path[0] == "Properties":
             _, group_name, key = path
-            self.current_properties["Properties"][group_name][key] = new_value
-            self.bottom_panel.append(f"[Изменено в памяти] {group_name} -> {key} = {new_value}")
+            old_value = self.current_properties["Properties"][group_name][key]
+            
+            if old_value == new_value:
+                return
 
-            if group_name == "Element Specific" and key in ("Name", "IfcEntity"):
-                if hasattr(self, 'current_tree_item') and self.current_tree_item:
-                    props = self.current_properties["Properties"]["Element Specific"]
-                    current_name = props.get("Name", "")
-                    current_type = props.get("IfcEntity", "")
-
-                    new_display_text = f"[{current_type}] {current_name}"
+            command = PropertyEditCommand(
+                self.model, 
+                self.current_global_id, 
+                path, 
+                old_value, 
+                new_value
+            )
+            
+            result = self.command_manager.execute(command)
+            
+            if result.get("success"):
+                self.bottom_panel.append(f"[Undo/Redo] Property '{key}' updated.")
+                self.__update_undo_redo_actions()
+                
+                # Update tree item if Name changed
+                if group_name == "Element Specific" and key == "Name":
+                    new_display_text = f"[{self.current_properties['Properties']['Element Specific'].get('IfcEntity', 'Unknown')}] {new_value}"
                     self.current_tree_item.setText(0, new_display_text)
-
-                    if key == "IfcEntity":
-                        self.current_tree_item.setData(0, Qt.ItemDataRole.UserRole + 1, current_type)
-
-        update_result = update_element_properties(
-            self.model,
-            self.current_global_id,
-            self.current_properties
-        )
-
-        if update_result.get("success"):
-            self.bottom_panel.append(f"[Core] {update_result['message']}")
-        else:
-            self.bottom_panel.append(f"[Core Error] Не удалось обновить IFC: {update_result.get('error')}")
+            else:
+                self.bottom_panel.append(f"[Core Error] {result.get('error')}")
+                # Revert UI if failed
+                self.property_tree.blockSignals(True)
+                item.setText(1, str(old_value))
+                self.property_tree.blockSignals(False)
 
     def __on_hierarchy_dropped(self, dragged_item, target_item, element_guid, parent_guid):
         if not hasattr(self, 'model'):
             return
 
-        self.bottom_panel.append(f"Attempting to move element...")
+        old_parent_item = dragged_item.parent() or self.tree.invisibleRootItem()
+        old_parent_guid = old_parent_item.data(0, Qt.ItemDataRole.UserRole)
 
-        result = edit_element_hierarchy(self.model, element_guid, parent_guid)
-
+        command = HierarchyCommand(
+            self.model, 
+            element_guid, 
+            old_parent_guid, 
+            parent_guid,
+            self.__update_hierarchy_ui
+        )
+        
+        result = self.command_manager.execute(command)
         if result.get("success"):
-            self.bottom_panel.append(f"[Core] {result['message']}")
-
-            self.tree.setUpdatesEnabled(False)
-
-            old_parent = dragged_item.parent()
-
-            if old_parent:
-                old_parent.takeChild(old_parent.indexOfChild(dragged_item))
-            else:
-                self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(dragged_item))
-
-            target_item.addChild(dragged_item)
-            target_item.setExpanded(True)
-
-            self.tree.clearSelection()
-            dragged_item.setSelected(True)
-            self.tree.scrollToItem(dragged_item)
-
-            self.tree.setUpdatesEnabled(True)
-
+            self.bottom_panel.append(f"[Undo/Redo] Hierarchy updated.")
+            self.__update_undo_redo_actions()
         else:
-            self.bottom_panel.append(f"[Core Error] Failed to move: {result.get('error')}")
+            self.bottom_panel.append(f"[Core Error] {result.get('error')}")
 
     def __open_file(self):
         file_path, filter_type = QFileDialog.getOpenFileName(
@@ -625,13 +702,12 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'model'):
             return
 
-        self.bottom_panel.append(f"Перемещение объекта {guid} на вектор: [{dx:.2f}, {dy:.2f}, {dz:.2f}] м")
-
-        result = move_ifc_element(self.model, guid, dx, dy, dz)
+        command = MoveCommand(self.model, guid, dx, dy, dz, self.viewport.move_object_visually)
+        result = self.command_manager.execute(command)
 
         if result.get("success"):
-            self.bottom_panel.append(f"[Core] {result['message']}")
-            self.bottom_panel.append("[INFO] Изменения в памяти. Сохраните файл для обновления 3D-кэша.")
+            self.bottom_panel.append(f"[Undo/Redo] {result['message']}")
+            self.__update_undo_redo_actions()
         else:
             self.bottom_panel.append(f"[Core Error] {result.get('error')}")
 

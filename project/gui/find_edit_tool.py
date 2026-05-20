@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 import ifcopenshell
+from core.manager.command_manager import BatchPropertyEditCommand
 
 class FindEditWindow(QWidget):
     # Signal to notify main window to select and focus on an element
@@ -12,9 +13,11 @@ class FindEditWindow(QWidget):
     # Signal to notify main window that properties were updated (to refresh UI if needed)
     properties_updated_signal = pyqtSignal()
 
-    def __init__(self, model, parent=None):
+    def __init__(self, model, command_manager, hierarchy_tree, parent=None):
         super().__init__(parent)
         self.model = model
+        self.command_manager = command_manager
+        self.hierarchy_tree = hierarchy_tree
         self.setWindowTitle("Find and Edit Elements")
         self.resize(500, 600)
         self.__init_ui()
@@ -42,7 +45,15 @@ class FindEditWindow(QWidget):
         self.results_list = QListWidget()
         self.results_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.results_list.itemSelectionChanged.connect(self.__on_selection_changed)
-        layout.addWidget(QLabel("Search Results (Hold Ctrl for multi-selection):"))
+        
+        results_header_layout = QHBoxLayout()
+        results_header_layout.addWidget(QLabel("Search Results (Hold Ctrl for multi-selection):"))
+        
+        self.select_all_btn = QPushButton("Select All")
+        self.select_all_btn.clicked.connect(self.__on_select_all)
+        results_header_layout.addWidget(self.select_all_btn)
+        
+        layout.addLayout(results_header_layout)
         layout.addWidget(self.results_list)
 
         # --- Batch Edit Section ---
@@ -92,6 +103,9 @@ class FindEditWindow(QWidget):
             guid = selected_items[0].data(Qt.ItemDataRole.UserRole)
             self.element_selected_signal.emit(guid)
 
+    def __on_select_all(self):
+        self.results_list.selectAll()
+
     def __on_apply_properties(self):
         selected_items = self.results_list.selectedItems()
         if not selected_items:
@@ -108,10 +122,7 @@ class FindEditWindow(QWidget):
         guids = [item.data(Qt.ItemDataRole.UserRole) for item in selected_items]
         elements = [self.model.by_guid(g) for g in guids]
 
-        # Check if all selected elements have this property
-        # For simplicity in this implementation, we check direct attributes 
-        # (like Name, Description) and Property Sets.
-        
+        # Validation phase
         for el in elements:
             if not self.__has_property(el, prop_name):
                 QMessageBox.critical(self, "Error", 
@@ -119,19 +130,31 @@ class FindEditWindow(QWidget):
                     "Batch edit cancelled.")
                 return
 
-        # Apply changes
-        count = 0
-        try:
-            for el in elements:
-                if self.__update_element_property(el, prop_name, prop_value):
-                    count += 1
-            
-            QMessageBox.information(self, "Success", f"Updated {count} elements.")
+        # Execute through command manager
+        command = BatchPropertyEditCommand(self.model, guids, prop_name, prop_value, self.__update_tree_name)
+        result = self.command_manager.execute(command)
+
+        if result.get("success"):
+            QMessageBox.information(self, "Success", result.get("message"))
             self.properties_updated_signal.emit()
-        except ValueError as ve:
-            QMessageBox.critical(self, "Type Error", str(ve))
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e}")
+        else:
+            QMessageBox.critical(self, "Error", result.get("error", "Batch update failed"))
+
+    def __update_tree_name(self, guid, new_name):
+        def _find(parent, g):
+            for i in range(parent.childCount()):
+                child = parent.child(i)
+                if child.data(0, Qt.ItemDataRole.UserRole) == g:
+                    return child
+                res = _find(child, g)
+                if res:
+                    return res
+            return None
+
+        item = _find(self.hierarchy_tree.invisibleRootItem(), guid)
+        if item:
+            ifc_type = item.data(0, Qt.ItemDataRole.UserRole + 1)
+            item.setText(0, f"[{ifc_type}] {new_name}")
 
     def __has_property(self, element, prop_name):
         # 1. Check direct attributes

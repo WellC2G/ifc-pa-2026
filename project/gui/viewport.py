@@ -7,7 +7,13 @@ from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 from OCC.Display.backend import load_backend
 
 from OCC.Core.AIS import AIS_Shape
-from OCC.Core.Quantity import Quantity_NOC_CYAN, Quantity_Color
+from OCC.Core.Quantity import (
+    Quantity_NOC_CYAN, 
+    Quantity_Color, 
+    Quantity_NOC_GOLDENROD,
+    Quantity_NOC_ORANGE,
+    Quantity_NOC_RED
+)
 from OCC.Core.Prs3d import Prs3d_LineAspect
 from OCC.Core.Aspect import Aspect_TOL_SOLID
 from OCC.Core.Bnd import Bnd_Box
@@ -160,7 +166,15 @@ class IFCViewport(QWidget):
             self.display.Context.UpdateCurrentViewer()
 
             bbox = Bnd_Box()
-            brepbndlib.Add(target_ais.Shape(), bbox)
+            
+            # Apply dynamic location to the shape before computing the bounding box
+            if self.display.Context.HasLocation(target_ais):
+                loc = self.display.Context.Location(target_ais)
+                transformed_shape = target_ais.Shape().Moved(loc)
+                brepbndlib.Add(transformed_shape, bbox)
+            else:
+                brepbndlib.Add(target_ais.Shape(), bbox)
+                
             xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
             self.cx = (xmin + xmax) / 2.0
             self.cy = (ymin + ymax) / 2.0
@@ -177,6 +191,28 @@ class IFCViewport(QWidget):
             self.display.Context.ClearSelected(True)
 
         self._is_updating_selection = False
+
+    def move_object_visually(self, global_id, dx, dy, dz):
+        target_ais = None
+        for ais, guid in self.ais_dict.items():
+            if guid == global_id:
+                target_ais = ais
+                break
+
+        if target_ais:
+            translation = gp_Trsf()
+            translation.SetTranslation(gp_Vec(dx, dy, dz))
+
+            if self.display.Context.HasLocation(target_ais):
+                orig_trsf = self.display.Context.Location(target_ais).Transformation()
+            else:
+                orig_trsf = gp_Trsf()
+
+            new_trsf = translation.Multiplied(orig_trsf)
+            new_loc = TopLoc_Location(new_trsf)
+
+            self.display.Context.SetLocation(target_ais, new_loc)
+            self.display.Context.UpdateCurrentViewer()
 
     def on_canvas_mouse_press(self, event):
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.button() == Qt.MouseButton.LeftButton:
