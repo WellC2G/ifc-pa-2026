@@ -81,6 +81,21 @@ class IFCViewport(QWidget):
         self.cy = 0.0
         self.cz = 0.0
 
+    def set_element_visibility(self, global_id, visible):
+        """Sets visibility for an element by its GlobalId."""
+        target_ais = None
+        for ais, guid in self.ais_dict.items():
+            if guid == global_id:
+                target_ais = ais
+                break
+        
+        if target_ais:
+            if visible:
+                self.display.Context.Display(target_ais, True)
+            else:
+                self.display.Context.Erase(target_ais, True)
+            self.display.Context.UpdateCurrentViewer()
+
     def showEvent(self, event):
         super().showEvent(event)
 

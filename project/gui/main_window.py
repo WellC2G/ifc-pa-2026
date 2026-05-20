@@ -5,6 +5,7 @@ from pathlib import Path
 
 from gui.viewport import IFCViewport
 from gui.find_edit_tool import FindEditWindow
+from gui.view_tool import ViewWindow
 from core.parse.get_project_hierarchy import get_project_hierarchy
 from core.manager.command_manager import CommandManager, MoveCommand, PropertyEditCommand, HierarchyCommand
 from core.parse.get_element_geometry import get_element_geometry
@@ -26,7 +27,8 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QFileDialog,
     QTreeWidgetItem,
-    QStyle
+    QStyle,
+    QToolButton
 )
 from PyQt6.QtCore import (
     QThread,
@@ -34,7 +36,7 @@ from PyQt6.QtCore import (
     QSettings,
     pyqtSignal,
 )
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QIcon
 
 
 class GeometryWorker(QThread):
@@ -61,6 +63,10 @@ class ProjectTreeWidget(QTreeWidget):
 
         self.setAutoScroll(True)
         self.setAutoScrollMargin(30)
+        
+        self.setColumnCount(2)
+        self.setColumnWidth(1, 30)
+        self.setHeaderLabels(["Struct of IFC", "View"])
 
     def dragEnterEvent(self, event):
         super().dragEnterEvent(event)
@@ -101,6 +107,12 @@ class MainWindow(QMainWindow):
 
         # Initialize Command Manager for Undo/Redo
         self.command_manager = CommandManager()
+        
+        # Visibility state cache
+        self.visibility_states = {} # guid -> bool
+        
+        # Initialize themes
+        self.__init_themes()
 
         # build main interface
         self.__init_ui()
@@ -112,124 +124,8 @@ class MainWindow(QMainWindow):
 
         self.setStyleSheet(self.themes["Dark"])
 
-    def __init_ui(self):
-        # two main widget
-        main_widget = QWidget()
-        main_layout = QVBoxLayout()
-
-        # create another widget
-
-        self.v_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.h_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.h_splitter_2 = QSplitter(Qt.Orientation.Horizontal)
-
-        # tree, bottom_panel and viewport NOW JUST plugs
-        self.tree = ProjectTreeWidget()
-        self.tree.setHeaderLabel("Struct of IFC")
-
-        self.tree.item_dropped_signal.connect(self.__on_hierarchy_dropped)
-
-        self.viewport = IFCViewport()
-        # self.viewport.setStyleSheet("background-color: #333333;")
-
-        self.bottom_panel = QTextEdit()
-        self.bottom_panel.setPlaceholderText("Place for logs")
-
-        self.property_tree = QTreeWidget()
-        self.property_tree.setHeaderLabels(["Property", "Value"])
-        self.property_tree.setAlternatingRowColors(True)
-
-        # add plugs to splitter
-        self.viewport.setMinimumSize(200, 200)
-
-        # add plugs to splitter
-        self.h_splitter.addWidget(self.tree)
-        self.h_splitter.addWidget(self.viewport)
-
-        self.h_splitter_2.addWidget(self.bottom_panel)
-        self.h_splitter_2.addWidget(self.property_tree)
-
-        self.v_splitter.addWidget(self.h_splitter)
-        self.v_splitter.addWidget(self.h_splitter_2)
-
-        # set default size on first open
-        self.v_splitter.setSizes([500, 100])
-
-        # ДОБАВЛЕНО: Явно задаем размеры для горизонтальных сплиттеров
-        # (Дерево: 200px, Viewport: 600px)
-        self.h_splitter.setSizes([200, 600])
-        self.h_splitter_2.setSizes([600, 200])
-
-        # add all to main widgets
-        main_layout.addWidget(self.v_splitter)
-        main_widget.setLayout(main_layout)
-
-        # add main widget to MainWindow
-        self.setCentralWidget(main_widget)
-
-        # just status bar
-        self.statusBar().showMessage("Ready to work")
-
-        # create root of tree
-        project_node = QTreeWidgetItem(self.tree, ["Project: House"])
-
-        # childs
-        floor_node = QTreeWidgetItem(project_node, ["Floor 1"])
-
-        wall_node = QTreeWidgetItem(floor_node, ["Wall_Basic_200mm"])
-        wall_node2 = QTreeWidgetItem(floor_node, ["Wall_Basic_100mm"])
-
-        # open all nodes
-        self.tree.expandAll()
-
-        self.tree.itemClicked.connect(self.__on_tree_click)
-        self.tree.itemDoubleClicked.connect(self.__on_tree_double_click)
-
-        self.property_tree.itemChanged.connect(self.__on_property_edited)
-
-        self.viewport.element_selected_signal.connect(self.__on_viewport_element_selected)
-        self.viewport.element_moved_signal.connect(self.__on_element_moved)
-
-    def __build_tree_ui(self, node_list: list, parent_item):
-        for node in node_list:
-            display_text = f"[{node['Type']}] {node['Name']}"
-
-            item = QTreeWidgetItem(parent_item, [display_text])
-
-            item.setData(0, Qt.ItemDataRole.UserRole, node["GlobalId"])
-            item.setData(0, Qt.ItemDataRole.UserRole + 1, node["Type"])
-
-            children = node.get("Children", [])
-            if children:
-                self.__build_tree_ui(children, item)
-
-    def __create_menu(self):
-        menu_bar = self.menuBar()
-        file_menu = menu_bar.addMenu("File")
-        edit_menu = menu_bar.addMenu("Edit")
-        tools_menu = menu_bar.addMenu("Tools")
-        settings_menu = menu_bar.addMenu("Settings")
-
-        theme_menu = settings_menu.addMenu("Theme")
-
-        # Edit menu actions
-        self.undo_action = QAction("Undo", self)
-        self.undo_action.setShortcut("Ctrl+Z")
-        self.undo_action.triggered.connect(self.__undo)
-        edit_menu.addAction(self.undo_action)
-
-        self.redo_action = QAction("Redo", self)
-        self.redo_action.setShortcut("Ctrl+Y")
-        self.redo_action.triggered.connect(self.__redo)
-        edit_menu.addAction(self.redo_action)
-
-        # Tools menu actions
-        find_edit_action = QAction("Find and Edit", self)
-        find_edit_action.triggered.connect(self.__on_find_edit_tool)
-        tools_menu.addAction(find_edit_action)
-
+    def __init_themes(self):
         self.themes = {
-
             "Light": """
                 QMainWindow, QWidget {
                     background-color: #f3f3f3; /* Светло-серый фон приложения */
@@ -340,26 +236,216 @@ class MainWindow(QMainWindow):
             """,
         }
 
-        open_action = QAction("Open", self)
-        save_action = QAction("Save", self)
-        exit_action = QAction("Exit", self)
+    def __init_ui(self):
+        # two main widget
+        main_widget = QWidget()
+        main_layout = QVBoxLayout()
 
+        # create another widget
+
+        self.v_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.h_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.h_splitter_2 = QSplitter(Qt.Orientation.Horizontal)
+
+        # tree, bottom_panel and viewport NOW JUST plugs
+        self.tree = ProjectTreeWidget()
+        self.tree.setHeaderLabel("Struct of IFC")
+
+        self.tree.item_dropped_signal.connect(self.__on_hierarchy_dropped)
+
+        self.viewport = IFCViewport()
+        # self.viewport.setStyleSheet("background-color: #333333;")
+
+        self.bottom_panel = QTextEdit()
+        self.bottom_panel.setPlaceholderText("Place for logs")
+
+        self.property_tree = QTreeWidget()
+        self.property_tree.setHeaderLabels(["Property", "Value"])
+        self.property_tree.setAlternatingRowColors(True)
+
+        # add plugs to splitter
+        self.viewport.setMinimumSize(200, 200)
+
+        # add plugs to splitter
+        self.h_splitter.addWidget(self.tree)
+        self.h_splitter.addWidget(self.viewport)
+
+        self.h_splitter_2.addWidget(self.bottom_panel)
+        self.h_splitter_2.addWidget(self.property_tree)
+
+        self.v_splitter.addWidget(self.h_splitter)
+        self.v_splitter.addWidget(self.h_splitter_2)
+
+        # set default size on first open
+        self.v_splitter.setSizes([500, 100])
+
+        # ДОБАВЛЕНО: Явно задаем размеры для горизонтальных сплиттеров
+        # (Дерево: 200px, Viewport: 600px)
+        self.h_splitter.setSizes([200, 600])
+        self.h_splitter_2.setSizes([600, 200])
+
+        # add all to main widgets
+        main_layout.addWidget(self.v_splitter)
+        main_widget.setLayout(main_layout)
+
+        # add main widget to MainWindow
+        self.setCentralWidget(main_widget)
+
+        # just status bar
+        self.statusBar().showMessage("Ready to work")
+
+        self.tree.itemClicked.connect(self.__on_tree_click)
+        self.tree.itemDoubleClicked.connect(self.__on_tree_double_click)
+
+        self.property_tree.itemChanged.connect(self.__on_property_edited)
+
+        self.viewport.element_selected_signal.connect(self.__on_viewport_element_selected)
+        self.viewport.element_moved_signal.connect(self.__on_element_moved)
+
+    def __build_tree_ui(self, node_list: list, parent_item):
+        for node in node_list:
+            display_text = f"[{node['Type']}] {node['Name']}"
+
+            item = QTreeWidgetItem(parent_item, [display_text])
+
+            item.setData(0, Qt.ItemDataRole.UserRole, node["GlobalId"])
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, node["Type"])
+            
+            # Add eye button
+            self.__add_eye_button(item)
+
+            children = node.get("Children", [])
+            if children:
+                self.__build_tree_ui(children, item)
+
+    def __add_eye_button(self, item):
+        btn = QToolButton()
+        guid = item.data(0, Qt.ItemDataRole.UserRole)
+        is_visible = self.visibility_states.get(guid, True)
+        
+        self.__update_eye_icon(btn, is_visible)
+        btn.clicked.connect(lambda: self.__toggle_tree_visibility(item))
+        
+        self.tree.setItemWidget(item, 1, btn)
+
+    def __update_eye_icon(self, btn, is_visible):
+        try:
+            if is_visible:
+                icon = QIcon.fromTheme("view-visible", QIcon.fromTheme("visibility"))
+            else:
+                icon = QIcon.fromTheme("view-hidden", QIcon.fromTheme("visibility-off"))
+            
+            if not icon.isNull():
+                btn.setIcon(icon)
+                btn.setText("")
+            else:
+                btn.setText("👁" if is_visible else "❌")
+        except Exception:
+            btn.setText("👁" if is_visible else "❌")
+
+    def __toggle_tree_visibility(self, item):
+        guid = item.data(0, Qt.ItemDataRole.UserRole)
+        current_visible = self.visibility_states.get(guid, True)
+        new_visible = not current_visible
+        
+        self.__set_recursive_visibility(item, new_visible)
+        
+        # Sync with View tool if open
+        if hasattr(self, 'view_window') and self.view_window:
+            self.view_window.sync_visibility(guid, new_visible)
+
+    def __set_recursive_visibility(self, item, visible):
+        guid = item.data(0, Qt.ItemDataRole.UserRole)
+        self.visibility_states[guid] = visible
+        
+        # Update icon
+        btn = self.tree.itemWidget(item, 1)
+        if btn:
+            self.__update_eye_icon(btn, visible)
+            
+        # Notify viewport
+        self.viewport.set_element_visibility(guid, visible)
+        
+        # Recurse for children
+        for i in range(item.childCount()):
+            self.__set_recursive_visibility(item.child(i), visible)
+
+    def __create_menu(self):
+        menu_bar = self.menuBar()
+        file_menu = menu_bar.addMenu("File")
+        edit_menu = menu_bar.addMenu("Edit")
+        tools_menu = menu_bar.addMenu("Tools")
+        settings_menu = menu_bar.addMenu("Settings")
+
+        theme_menu = settings_menu.addMenu("Theme")
+
+        # Edit menu actions
+        self.undo_action = QAction("Undo", self)
+        self.undo_action.setShortcut("Ctrl+Z")
+        self.undo_action.triggered.connect(self.__undo)
+        edit_menu.addAction(self.undo_action)
+
+        self.redo_action = QAction("Redo", self)
+        self.redo_action.setShortcut("Ctrl+Y")
+        self.redo_action.triggered.connect(self.__redo)
+        edit_menu.addAction(self.redo_action)
+
+        # Tools menu actions
+        find_edit_action = QAction("Find and Edit", self)
+        find_edit_action.triggered.connect(self.__on_find_edit_tool)
+        tools_menu.addAction(find_edit_action)
+        
+        view_action = QAction("View", self)
+        view_action.triggered.connect(self.__on_view_tool)
+        tools_menu.addAction(view_action)
+
+        # Theme menu actions
         for theme_name in self.themes.keys():
             action = QAction(theme_name, self)
-
-            # Используем ту самую правильную лямбду с сохранением имени
             action.triggered.connect(lambda checked, name=theme_name: self.change_theme(name))
-
-            # Добавляем действие (цвет) в подменю Theme
             theme_menu.addAction(action)
 
-        exit_action.triggered.connect(self.close)
+        # File menu actions
+        open_action = QAction("Open", self)
         open_action.triggered.connect(self.__open_file)
-        save_action.triggered.connect(self.__save_file)
-
         file_menu.addAction(open_action)
+
+        save_action = QAction("Save", self)
+        save_action.triggered.connect(self.__save_file)
         file_menu.addAction(save_action)
+
+        exit_action = QAction("Exit", self)
+        exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+    def __on_view_tool(self):
+        if not hasattr(self, 'model'):
+            self.bottom_panel.append("Ошибка: Сначала откройте IFC файл.")
+            return
+
+        if not hasattr(self, 'view_window') or self.view_window is None:
+            self.view_window = ViewWindow(self.model, self.viewport)
+            self.view_window.visibility_changed_signal.connect(self.__on_visibility_changed_from_tool)
+            self.view_window.element_selected_signal.connect(self.__on_viewport_element_selected)
+        
+        self.view_window.show()
+        self.view_window.raise_()
+        self.view_window.activateWindow()
+
+    def __on_visibility_changed_from_tool(self, guid, visible):
+        # Update main tree icon if it exists there
+        self.visibility_states[guid] = visible
+        self.viewport.set_element_visibility(guid, visible)
+        
+        item = self.__find_item_by_guid(self.tree.invisibleRootItem(), guid)
+        if item:
+            btn = self.tree.itemWidget(item, 1)
+            if btn:
+                self.__update_eye_icon(btn, visible)
+            
+            # Recurse for main tree if it was a parent
+            for i in range(item.childCount()):
+                self.__set_recursive_visibility(item.child(i), visible)
 
     def __create_toolbar(self):
         toolbar = self.addToolBar("Actions")
