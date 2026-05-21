@@ -12,7 +12,6 @@ def get_element_geometry(model: ifcopenshell.file) -> dict:
         projects = model.by_type("IfcProject")
         project_id = projects[0].GlobalId if projects else "unknown_project"
         cache_folder = temp_dir / f"ifc_brep_{project_id}"
-        meta_file = cache_folder / "meta.json"
 
         if cache_folder.exists() and any(cache_folder.iterdir()):
             print(f"B-Rep cache found: {cache_folder}")
@@ -23,15 +22,8 @@ def get_element_geometry(model: ifcopenshell.file) -> dict:
             }
 
         print("Starting B-Rep generation...")
-        import ifcopenshell.util.unit
-        unit_scale = ifcopenshell.util.unit.calculate_unit_scale(model)
-        print(f"Model unit scale: {unit_scale}")
 
         cache_folder.mkdir(parents=True, exist_ok=True)
-        
-        # Сохраняем unit_scale для Viewport
-        with open(meta_file, "w", encoding="utf-8") as f:
-            json.dump({"unit_scale": unit_scale}, f)
 
         settings = ifcopenshell.geom.settings()
         settings.set("use-world-coords", True)

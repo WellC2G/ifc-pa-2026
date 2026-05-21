@@ -796,6 +796,8 @@ class MainWindow(QMainWindow):
             self.__update_undo_redo_actions()
         else:
             self.bottom_panel.append(f"[Core Error] {result.get('error')}")
+            # Revert visual movement if core update failed to keep UI in sync with model
+            self.viewport.move_object_visually(guid, -dx, -dy, -dz)
 
     def closeEvent(self, event):
         """this method called before close app"""
