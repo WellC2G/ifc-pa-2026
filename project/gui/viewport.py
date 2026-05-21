@@ -17,7 +17,8 @@ from OCC.Core.Quantity import (
     Quantity_TOC_RGB
 )
 from OCC.Core.Prs3d import Prs3d_LineAspect
-from OCC.Core.Aspect import Aspect_TOL_SOLID
+from OCC.Core.Aspect import Aspect_TOL_SOLID, Aspect_TOTP_RIGHT_UPPER, Aspect_TOTP_LEFT_LOWER
+from OCC.Core.V3d import V3d_ZBUFFER, V3d_Xpos, V3d_Xneg, V3d_Ypos, V3d_Yneg, V3d_Zpos, V3d_Zneg
 from OCC.Core.Bnd import Bnd_Box
 from OCC.Core.BRepBndLib import brepbndlib
 
@@ -30,6 +31,7 @@ from OCC.Core.BRepTools import breptools
 from OCC.Core.BRep import BRep_Builder
 from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Compound
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeCone
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QGridLayout
 
 
 def _load_brep_file(file_path):
@@ -322,6 +324,10 @@ class IFCViewport(QWidget):
                 self.display.FitAll()
                 self._init_gizmo()
                 self._is_configured = True
+        
+        if not hasattr(self, 'nav_overlay_created') or not self.nav_overlay_created:
+            self._init_navigation_overlay()
+            self.nav_overlay_created = True
 
         self.canvas.update()
 
@@ -582,3 +588,58 @@ class IFCViewport(QWidget):
         self._original_mouseReleaseEvent(event)
         self._last_dz = 0.0
         return
+
+    def _init_navigation_overlay(self):
+        """Initializes PyQt-based navigation overlay and OCC Triedron."""
+        try:
+            # Native OCC Triedron for visual orientation
+            self.display.View.TriedronDisplay(Aspect_TOTP_RIGHT_UPPER, Quantity_Color(Quantity_NOC_WHITE), 0.1, V3d_ZBUFFER)
+
+            # PyQt Overlay for snapping interaction
+            if not hasattr(self, 'nav_overlay'):
+                self.nav_overlay = QWidget(self.canvas)
+                self.nav_overlay.setStyleSheet("background: transparent;")
+
+                # Grid layout for navigation buttons
+                nav_layout = QGridLayout(self.nav_overlay)
+                nav_layout.setContentsMargins(0, 0, 0, 0)
+                nav_layout.setSpacing(2)
+
+                btn_style = "background-color: rgba(60, 60, 60, 180); color: white; border: 1px solid #555; padding: 4px; font-size: 10px; font-weight: bold; border-radius: 4px;"
+
+                buttons = [
+                    ("Top", V3d_Zpos, 0, 1), ("Bottom", V3d_Zneg, 2, 1),
+                    ("Front", V3d_Yneg, 1, 1), ("Back", V3d_Ypos, 1, 3),
+                    ("Left", V3d_Xneg, 1, 0), ("Right", V3d_Xpos, 1, 2)
+                ]
+
+                for name, orientation, row, col in buttons:
+                    btn = QPushButton(name)
+                    btn.setStyleSheet(btn_style)
+                    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    btn.setFixedSize(50, 25)
+                    btn.clicked.connect(lambda _, o=orientation: self._snap_camera(o))
+                    nav_layout.addWidget(btn, row, col)
+
+                self.nav_overlay.show()
+                self._update_overlay_position()
+
+        except Exception as e:
+            print(f"Viewport: Navigation overlay failure: {e}")
+
+    def _snap_camera(self, orientation):
+        """Snaps the camera to a specific plane."""
+        self.display.View.SetProj(orientation)
+        self.display.View.FitAll()
+        self.display.Context.UpdateCurrentViewer()
+
+    def _update_overlay_position(self):
+        """Keeps the navigation overlay in the top right corner."""
+        if hasattr(self, 'nav_overlay') and self.nav_overlay.isVisible():
+            overlay_size = self.nav_overlay.sizeHint()
+            # Position directly over the Triedron (buttons on top in Z-order, axis underneath)
+            self.nav_overlay.setGeometry(self.width() - overlay_size.width() - 10, 10, overlay_size.width(), overlay_size.height())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_overlay_position()
