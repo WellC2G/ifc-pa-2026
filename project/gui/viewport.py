@@ -637,8 +637,8 @@ class IFCViewport(QWidget):
         """Keeps the navigation overlay in the top right corner."""
         if hasattr(self, 'nav_overlay') and self.nav_overlay.isVisible():
             overlay_size = self.nav_overlay.sizeHint()
-            # Position directly over the Triedron (buttons on top in Z-order, axis underneath)
-            self.nav_overlay.setGeometry(self.width() - overlay_size.width() - 10, 10, overlay_size.width(), overlay_size.height())
+            # Position below the Triedron (Triedron is at top right)
+            self.nav_overlay.setGeometry(self.width() - overlay_size.width() - 10, 120, overlay_size.width(), overlay_size.height())
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

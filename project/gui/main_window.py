@@ -379,6 +379,10 @@ class MainWindow(QMainWindow):
         settings_menu = menu_bar.addMenu("Settings")
 
         theme_menu = settings_menu.addMenu("Theme")
+        
+        clear_cache_action = QAction("Clear Cache", self)
+        clear_cache_action.triggered.connect(self.__on_clear_cache)
+        settings_menu.addAction(clear_cache_action)
 
         # Edit menu actions
         self.undo_action = QAction("Undo", self)
@@ -422,6 +426,23 @@ class MainWindow(QMainWindow):
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+    def __on_clear_cache(self):
+        temp_dir = Path(tempfile.gettempdir())
+        cache_folders = list(temp_dir.glob("ifc_brep_*"))
+        if not cache_folders:
+            self.bottom_panel.append("[Settings] Cache is already empty.")
+            return
+            
+        deleted_count = 0
+        for folder in cache_folders:
+            try:
+                shutil.rmtree(folder)
+                deleted_count += 1
+            except Exception as e:
+                self.bottom_panel.append(f"[Settings] Error deleting {folder.name}: {e}")
+        
+        self.bottom_panel.append(f"[Settings] Successfully cleared {deleted_count} cache folders.")
 
     def __on_import_ifc_tool(self):
         if not hasattr(self, 'model'):
