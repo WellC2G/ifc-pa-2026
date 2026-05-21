@@ -11,6 +11,7 @@ from core.manager.command_manager import CommandManager, MoveCommand, PropertyEd
 from core.parse.get_element_geometry import get_element_geometry
 from core.parse.get_properties_by_global_id import get_properties_by_global_id
 from core.file.save_file import save_ifc_model
+from core.file.import_file import import_ifc_model
 from core.edit_data.edit_data import update_element_properties
 from core.edit_data.edit_hierarchy import edit_element_hierarchy
 from core.edit_data.edit_placement import move_ifc_element
@@ -42,13 +43,13 @@ from PyQt6.QtGui import QAction, QIcon
 class GeometryWorker(QThread):
     finished_signal = pyqtSignal(dict)
 
-    def __init__(self, model):
+    def __init__(self, model, force_regenerate=False):
         super().__init__()
         self.model = model
+        self.force_regenerate = force_regenerate
 
     def run(self):
-        geom_data = get_element_geometry(self.model)
-
+        geom_data = get_element_geometry(self.model, self.force_regenerate)
         self.finished_signal.emit(geom_data)
 
 
@@ -399,6 +400,10 @@ class MainWindow(QMainWindow):
         view_action.triggered.connect(self.__on_view_tool)
         tools_menu.addAction(view_action)
 
+        import_action = QAction("Import/Add IFC...", self)
+        import_action.triggered.connect(self.__on_import_ifc_tool)
+        tools_menu.addAction(import_action)
+
         # Theme menu actions
         for theme_name in self.themes.keys():
             action = QAction(theme_name, self)
@@ -417,6 +422,41 @@ class MainWindow(QMainWindow):
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+    def __on_import_ifc_tool(self):
+        if not hasattr(self, 'model'):
+            self.bottom_panel.append("Ошибка: Сначала откройте базовый IFC файл.")
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select IFC Model to Import",
+            "",
+            "IFC Files (*.ifc);;All Files (*)"
+        )
+
+        if file_path:
+            self.bottom_panel.append(f"Импорт файла: {file_path}...")
+            QApplication.processEvents()
+
+            result = import_ifc_model(self.model, file_path)
+
+            if result.get("success"):
+                self.bottom_panel.append(result["message"])
+                self.bottom_panel.append("Перестроение дерева проекта...")
+                QApplication.processEvents()
+                
+                self.tree.clear()
+                hierarchy_list = get_project_hierarchy(self.model)
+                self.__build_tree_ui(hierarchy_list, self.tree)
+                self.tree.expandAll()
+
+                self.bottom_panel.append("Перегенерация 3D геометрии (с обновлением кэша)...")
+                self.geom_worker = GeometryWorker(self.model, force_regenerate=True)
+                self.geom_worker.finished_signal.connect(self.__on_geometry_loaded)
+                self.geom_worker.start()
+            else:
+                self.bottom_panel.append(f"Ошибка импорта: {result.get('error')}")
 
     def __on_view_tool(self):
         if not hasattr(self, 'model'):

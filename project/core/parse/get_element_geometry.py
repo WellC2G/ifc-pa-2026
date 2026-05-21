@@ -6,12 +6,16 @@ import concurrent.futures
 import json
 from pathlib import Path
 
-def get_element_geometry(model: ifcopenshell.file) -> dict:
+def get_element_geometry(model: ifcopenshell.file, force_regenerate: bool = False) -> dict:
     try:
+        import shutil
         temp_dir = Path(tempfile.gettempdir())
         projects = model.by_type("IfcProject")
         project_id = projects[0].GlobalId if projects else "unknown_project"
         cache_folder = temp_dir / f"ifc_brep_{project_id}"
+
+        if force_regenerate and cache_folder.exists():
+            shutil.rmtree(cache_folder)
 
         if cache_folder.exists() and any(cache_folder.iterdir()):
             print(f"B-Rep cache found: {cache_folder}")
