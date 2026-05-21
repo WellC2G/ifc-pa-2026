@@ -12,11 +12,8 @@ from OCC.Core.Quantity import (
     Quantity_NOC_CYAN,
     Quantity_Color,
     Quantity_NOC_GOLDENROD,
-    Quantity_NOC_ORANGE,
-    Quantity_NOC_RED,
     Quantity_NOC_WHITE,
-    Quantity_NOC_GREEN,
-    Quantity_NOC_BLUE1,
+    Quantity_NOC_BLACK,
     Quantity_TOC_RGB
 )
 from OCC.Core.Prs3d import Prs3d_LineAspect
@@ -115,6 +112,33 @@ class IFCViewport(QWidget):
         self.cx = 0.0
         self.cy = 0.0
         self.cz = 0.0
+        self._last_selected_ais = None
+
+    def _update_selection_visual(self, new_ais):
+        """Helper to manage manual color highlighting (White/Black for selection, Goldenrod/Cyan for default)."""
+        goldenrod = Quantity_Color(Quantity_NOC_GOLDENROD)
+        cyan = Quantity_Color(Quantity_NOC_CYAN)
+        white = Quantity_Color(Quantity_NOC_WHITE)
+        black = Quantity_Color(Quantity_NOC_BLACK)
+
+        if self._last_selected_ais and not _is_same_ais(self._last_selected_ais, new_ais):
+            # Revert old selection to default: Goldenrod surface, Cyan wireframe
+            self.display.Context.SetColor(self._last_selected_ais, goldenrod, False)
+            drawer = self._last_selected_ais.Attributes()
+            if drawer.FaceBoundaryDraw():
+                drawer.FaceBoundaryAspect().SetColor(cyan)
+            self.display.Context.Redisplay(self._last_selected_ais, False)
+        
+        self._last_selected_ais = new_ais
+        if self._last_selected_ais:
+            # Apply selection style: White surface, Black wireframe
+            self.display.Context.SetColor(self._last_selected_ais, white, False)
+            drawer = self._last_selected_ais.Attributes()
+            if drawer.FaceBoundaryDraw():
+                drawer.FaceBoundaryAspect().SetColor(black)
+            self.display.Context.Redisplay(self._last_selected_ais, False)
+        
+        self.display.Context.UpdateCurrentViewer()
 
     def set_element_visibility(self, global_id, visible):
         """Sets visibility for an element by its GlobalId."""
@@ -353,6 +377,7 @@ class IFCViewport(QWidget):
             self.display.Context.InitSelected()
             if self.display.Context.MoreSelected():
                 selected_ais = self.display.Context.SelectedInteractive()
+                self._update_selection_visual(selected_ais)
 
                 found_guid = None
                 for ais, guid in self.ais_dict.items():
@@ -370,6 +395,7 @@ class IFCViewport(QWidget):
                 target_ais = ais
                 break
 
+        self._update_selection_visual(target_ais)
         self._is_updating_selection = True
 
         if target_ais:
@@ -468,6 +494,13 @@ class IFCViewport(QWidget):
             return
 
         self._original_mousePressEvent(event)
+        
+        # Обновляем визуальное выделение при обычном клике
+        self.display.Context.InitSelected()
+        if self.display.Context.MoreSelected():
+            self._update_selection_visual(self.display.Context.SelectedInteractive())
+        else:
+            self._update_selection_visual(None)
 
     def on_canvas_mouse_move(self, event):
         if self._is_object_dragging and self._dragged_ais:
