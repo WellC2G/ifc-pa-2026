@@ -157,6 +157,20 @@ class IFCViewport(QWidget):
                 self.display.Context.Erase(target_ais, True)
             self.display.Context.UpdateCurrentViewer()
 
+    def remove_element(self, global_id):
+        """Completely removes an element from the viewport and internal dictionary."""
+        target_ais = None
+        for ais, guid in self.ais_dict.items():
+            if guid == global_id:
+                target_ais = ais
+                break
+
+        if target_ais:
+            self.display.Context.Erase(target_ais, True)
+            self.display.Context.Remove(target_ais, True)
+            del self.ais_dict[target_ais]
+            self.display.Context.UpdateCurrentViewer()
+
     def _create_arrow(self, dx, dy, dz, r, g, b):
         length = 1.0
         # Делаем стержень чуть толще для лучшей видимости (с 0.02 до 0.03)
