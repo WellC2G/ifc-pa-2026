@@ -207,8 +207,8 @@ class IFCViewport(QWidget):
         dz = zmax - zmin
         max_dim = max(dx, dy, dz)
 
-        # Используем 10% от размера объекта
-        self.gizmo_size = max_dim * 0.10
+        # Делаем гизмо чуть больше радиуса объекта (50% + 15%), чтобы он всегда выступал наружу
+        self.gizmo_size = max_dim * 0.65
 
         trsf = gp_Trsf()
         trsf.SetTranslation(gp_Vec(self.gizmo_cx, self.gizmo_cy, self.gizmo_cz))
