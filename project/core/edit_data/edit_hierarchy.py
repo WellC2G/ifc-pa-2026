@@ -52,3 +52,17 @@ def edit_element_hierarchy(model: ifcopenshell.file, element_guid: str, new_pare
 
     except Exception as e:
         return {"success": False, "error": f"Critical core error: {str(e)}"}
+
+def get_parent_guid(element) -> str:
+    """Helper to find the parent GUID of an element."""
+    # check spatial containment
+    for rel in getattr(element, "ContainedInStructure", []):
+        if rel.is_a("IfcRelContainedInSpatialStructure"):
+            return rel.RelatingStructure.GlobalId
+    
+    # check aggregation
+    for rel in getattr(element, "Decomposes", []):
+        if rel.is_a("IfcRelAggregates"):
+            return rel.RelatingObject.GlobalId
+            
+    return None

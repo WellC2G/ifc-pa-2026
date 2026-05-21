@@ -7,7 +7,14 @@ from gui.viewport import IFCViewport
 from gui.find_edit_tool import FindEditWindow
 from gui.view_tool import ViewWindow
 from core.parse.get_project_hierarchy import get_project_hierarchy
-from core.manager.command_manager import CommandManager, MoveCommand, PropertyEditCommand, HierarchyCommand
+from core.manager.command_manager import (
+    CommandManager, 
+    MoveCommand, 
+    PropertyEditCommand, 
+    HierarchyCommand,
+    DeleteCommand,
+    ImportCommand
+)
 from core.parse.get_element_geometry import get_element_geometry
 from core.parse.get_properties_by_global_id import get_properties_by_global_id
 from core.file.save_file import save_ifc_model
@@ -477,21 +484,18 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.StandardButton.Yes:
             self.bottom_panel.append(f"Deleting element: {guid}...")
             
-            result = delete_ifc_element(self.model, guid)
+            command = DeleteCommand(self.model, guid)
+            result = self.command_manager.execute(command)
             
             if result.get("success"):
                 self.bottom_panel.append(f"[Success] {result['message']}")
+                self.__update_undo_redo_actions()
                 
                 # Update Viewport
                 self.viewport.remove_element(guid)
                 
                 # Rebuild Tree
-                self.tree.clear()
-                hierarchy_list = get_project_hierarchy(self.model)
-                self.__build_tree_ui(hierarchy_list, self.tree)
-                self.tree.expandAll()
-                
-                self.bottom_panel.append("Project tree rebuilt successfully.")
+                self.__rebuild_tree()
             else:
                 self.bottom_panel.append(f"[Error] {result.get('error')}")
 
@@ -511,17 +515,14 @@ class MainWindow(QMainWindow):
             self.bottom_panel.append(f"Импорт файла: {file_path}...")
             QApplication.processEvents()
 
-            result = import_ifc_model(self.model, file_path)
+            command = ImportCommand(self.model, file_path)
+            result = self.command_manager.execute(command)
 
             if result.get("success"):
                 self.bottom_panel.append(result["message"])
-                self.bottom_panel.append("Перестроение дерева проекта...")
-                QApplication.processEvents()
+                self.__update_undo_redo_actions()
                 
-                self.tree.clear()
-                hierarchy_list = get_project_hierarchy(self.model)
-                self.__build_tree_ui(hierarchy_list, self.tree)
-                self.tree.expandAll()
+                self.__rebuild_tree()
 
                 self.bottom_panel.append("Перегенерация 3D геометрии (с обновлением кэша)...")
                 self.geom_worker = GeometryWorker(self.model, force_regenerate=True)
@@ -529,6 +530,13 @@ class MainWindow(QMainWindow):
                 self.geom_worker.start()
             else:
                 self.bottom_panel.append(f"Ошибка импорта: {result.get('error')}")
+
+    def __rebuild_tree(self):
+        self.tree.clear()
+        hierarchy_list = get_project_hierarchy(self.model)
+        self.__build_tree_ui(hierarchy_list, self.tree)
+        self.tree.expandAll()
+        self.bottom_panel.append("Project tree rebuilt.")
 
     def __on_view_tool(self):
         if not hasattr(self, 'model'):
@@ -576,23 +584,63 @@ class MainWindow(QMainWindow):
         self.__update_undo_redo_actions()
 
     def __undo(self):
+        if not self.command_manager.can_undo():
+            return
+
+        command = self.command_manager.undo_stack[-1]
+        
+        # Confirmation for Delete/Import
+        if isinstance(command, (DeleteCommand, ImportCommand)):
+            msg = "Undo element deletion? This will restore the object." if isinstance(command, DeleteCommand) else "Undo element insertion? This will remove imported elements."
+            reply = QMessageBox.question(self, "Confirm Undo", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
         result = self.command_manager.undo()
         if result.get("success"):
             self.bottom_panel.append(f"[Undo] {result.get('message', 'Action undone')}")
             self.__update_undo_redo_actions()
-            command = result.get("command")
-            if command and command.element_guid:
+            
+            if isinstance(command, (DeleteCommand, ImportCommand, HierarchyCommand)):
+                self.__rebuild_tree()
+                # Regenerate 3D for Import/Delete
+                if isinstance(command, (DeleteCommand, ImportCommand)):
+                    self.geom_worker = GeometryWorker(self.model, force_regenerate=True)
+                    self.geom_worker.finished_signal.connect(self.__on_geometry_loaded)
+                    self.geom_worker.start()
+            
+            if command and hasattr(command, "element_guid") and command.element_guid:
                 self.__on_viewport_element_selected(command.element_guid)
         else:
             self.bottom_panel.append(f"[Undo Error] {result.get('error')}")
 
     def __redo(self):
+        if not self.command_manager.can_redo():
+            return
+
+        command = self.command_manager.redo_stack[-1]
+
+        # Confirmation for Delete/Import
+        if isinstance(command, (DeleteCommand, ImportCommand)):
+            msg = "Redo element deletion?" if isinstance(command, DeleteCommand) else "Redo element insertion?"
+            reply = QMessageBox.question(self, "Confirm Redo", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
         result = self.command_manager.redo()
         if result.get("success"):
             self.bottom_panel.append(f"[Redo] {result.get('message', 'Action redone')}")
             self.__update_undo_redo_actions()
-            command = result.get("command")
-            if command and command.element_guid:
+            
+            if isinstance(command, (DeleteCommand, ImportCommand, HierarchyCommand)):
+                self.__rebuild_tree()
+                # Regenerate 3D for Import/Delete
+                if isinstance(command, (DeleteCommand, ImportCommand)):
+                    self.geom_worker = GeometryWorker(self.model, force_regenerate=True)
+                    self.geom_worker.finished_signal.connect(self.__on_geometry_loaded)
+                    self.geom_worker.start()
+
+            if command and hasattr(command, "element_guid") and command.element_guid:
                 self.__on_viewport_element_selected(command.element_guid)
         else:
             self.bottom_panel.append(f"[Redo Error] {result.get('error')}")

@@ -4,7 +4,9 @@ import ifcopenshell.util.placement
 import numpy as np
 from core.edit_data.edit_placement import move_ifc_element
 from core.edit_data.edit_data import update_element_properties
-from core.edit_data.edit_hierarchy import edit_element_hierarchy
+from core.edit_data.edit_hierarchy import edit_element_hierarchy, get_parent_guid
+from core.edit_data.delete_element import delete_ifc_element
+from core.file.import_file import import_ifc_model
 from core.parse.get_properties_by_global_id import get_properties_by_global_id
 
 class Command:
@@ -17,6 +19,76 @@ class Command:
     @property
     def element_guid(self):
         return None
+
+class DeleteCommand(Command):
+    def __init__(self, model, guid):
+        self.model = model
+        self.guid = guid
+        self.old_parent_guid = None
+        self.trash_model = None
+        self.element_type = None
+        self.element_name = None
+
+    @property
+    def element_guid(self):
+        return self.guid
+
+    def execute(self):
+        element = self.model.by_guid(self.guid)
+        if not element:
+            return {"success": False, "error": "Element not found"}
+
+        self.element_type = element.is_a()
+        self.element_name = str(getattr(element, "Name", self.guid))
+        self.old_parent_guid = get_parent_guid(element)
+
+        # Backup to trash model
+        self.trash_model = ifcopenshell.api.run("project.create_file")
+        ifcopenshell.api.run("root.create_entity", self.trash_model, ifc_class="IfcProject")
+        
+        ifcopenshell.api.run("project.append_asset", self.trash_model, library=self.model, element=element)
+
+        return delete_ifc_element(self.model, self.guid)
+
+    def undo(self):
+        # Restore from trash
+        imported_el = self.trash_model.by_guid(self.guid)
+        new_el = ifcopenshell.api.run("project.append_asset", self.model, library=self.trash_model, element=imported_el)
+        
+        # Restore hierarchy
+        if self.old_parent_guid:
+            edit_element_hierarchy(self.model, new_el.GlobalId, self.old_parent_guid)
+            
+        return {"success": True, "message": f"Restored {self.element_type} [{self.element_name}]"}
+
+    def redo(self):
+        return delete_ifc_element(self.model, self.guid)
+
+class ImportCommand(Command):
+    def __init__(self, model, import_file_path):
+        self.model = model
+        self.file_path = import_file_path
+        self.imported_guids = []
+
+    def execute(self):
+        res = import_ifc_model(self.model, self.file_path)
+        if res.get("success"):
+            self.imported_guids = res.get("appended_guids", [])
+        return res
+
+    def undo(self):
+        count = 0
+        for guid in self.imported_guids:
+            res = delete_ifc_element(self.model, guid)
+            if res.get("success"):
+                count += 1
+        return {"success": True, "message": f"Undid import: removed {count} elements."}
+
+    def redo(self):
+        # Re-importing might generate new GUIDs if we are not careful, 
+        # but import_ifc_model uses project.append_asset which might reuse them or create new ones.
+        # For simplicity, we just run execute again.
+        return self.execute()
 
 class MoveCommand(Command):
     def __init__(self, model, guid, dx, dy, dz, viewport_callback=None):
